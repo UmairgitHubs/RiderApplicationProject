@@ -1,0 +1,24 @@
+For Merchant Account:
+Email: merchant@test.com
+Password: merchant123
+For Rider Account:
+Email: rider@test.com
+Password: rider123
+---------------------------
+Technology stack
+React Native with Expo
+TypeScript
+Cross-platform framework
+Platform support
+Android — supported
+iOS (iPhone/iPad) — supported
+Single codebase for both
+How it works
+One codebase builds for Android and iOS
+Expo handles native builds
+No separate Android/iOS projects needed
+Deployment
+Android: Google Play Store
+iOS: Apple App Store
+Same app, both platforms
+Bottom line: Built with React Native + Expo. Supports Android and iOS from one codebase.

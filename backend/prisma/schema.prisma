@@ -1,0 +1,516 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                    String              @id @default(uuid())
+  email                 String              @unique
+  password_hash         String
+  role                  String
+  phone                 String?
+  full_name             String?
+  profile_image_url     String?
+  is_active             Boolean             @default(true)
+  is_verified           Boolean             @default(false)
+  language_preference   String?             @default("en")
+  theme_preference      String?             @default("light")
+  email_notifications   Boolean             @default(true)
+  push_notifications    Boolean             @default(true)
+  weekly_reports        Boolean             @default(true)
+  two_factor_enabled    Boolean             @default(false)
+  two_factor_secret     String?
+  fcm_token             String?
+  created_at            DateTime            @default(now())
+  updated_at            DateTime            @updatedAt
+  addresses             Address[]
+  chat_received         ChatMessage[]       @relation("ReceivedMessages")
+  chat_sent             ChatMessage[]       @relation("SentMessages")
+  managed_hubs          Hub[]               @relation("HubManager")
+  merchant              Merchant?
+  notifications         Notification[]
+  payments              Payment[]
+  rider                 Rider?
+  sessions              Session[]
+  tracking_updates      ShipmentTracking[]
+  shipments_as_merchant Shipment[]          @relation("MerchantShipments")
+  shipments_as_rider    Shipment[]          @relation("RiderShipments")
+  activity_logs         ActivityLog[]
+  verification_codes    VerificationCode[]
+  wallet_transactions   WalletTransaction[]
+  agent                 Agent?
+  referred_by           String?
+  tickets_raised        SupportTicket[]     @relation("TicketsRaised")
+  tickets_assigned      SupportTicket[]     @relation("TicketsAssigned")
+  support_messages      SupportMessage[]
+
+  @@index([email])
+  @@index([role])
+  @@index([referred_by])
+  @@map("users")
+}
+
+model Agent {
+  id             String   @id
+  referral_code  String   @unique
+  territory      String?
+  total_clients  Int      @default(0)
+  active_clients Int      @default(0)
+  total_earnings Decimal  @default(0) @db.Decimal(10, 2)
+  rating         Decimal  @default(5.0) @db.Decimal(3, 2)
+  is_active      Boolean  @default(true)
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+  user           User     @relation(fields: [id], references: [id], onDelete: Cascade)
+  
+  @@map("agents")
+}
+
+model ActivityLog {
+  id           String   @id @default(uuid())
+  user_id      String
+  action       String
+  description  String?
+  ip_address   String?
+  user_agent   String?
+  location     String?
+  created_at   DateTime @default(now())
+  user         User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, created_at(sort: Desc)])
+  @@map("activity_logs")
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  user_id      String
+  token        String   @unique
+  ip_address   String?
+  user_agent   String?
+  device_name  String?
+  last_active  DateTime @default(now())
+  created_at   DateTime @default(now())
+  expires_at   DateTime
+  user         User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+  @@map("sessions")
+}
+
+model Merchant {
+  id             String   @id
+  business_name  String?
+  business_type  String?
+  tax_id         String?
+  address        String?
+  city           String?
+  country        String?  @default("Pakistan")
+  wallet_balance Decimal  @default(0) @db.Decimal(10, 2)
+  total_spent    Decimal  @default(0) @db.Decimal(10, 2)
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+  user           User     @relation(fields: [id], references: [id], onDelete: Cascade)
+
+  @@map("merchants")
+}
+
+model Rider {
+  id                String          @id
+  cnic              String?         @unique
+  license_number    String?
+  vehicle_type      String?
+  vehicle_number    String?
+  is_online         Boolean         @default(false)
+  current_latitude  Decimal?        @db.Decimal(10, 8)
+  current_longitude Decimal?        @db.Decimal(11, 8)
+  wallet_balance    Decimal         @default(0) @db.Decimal(10, 2)
+  total_earnings    Decimal         @default(0) @db.Decimal(10, 2)
+  rating            Decimal         @default(0) @db.Decimal(3, 2)
+  total_deliveries  Int             @default(0)
+  hub_id            String?
+  created_at        DateTime        @default(now())
+  updated_at        DateTime        @updatedAt
+  location_updates  RiderLocation[]
+  hub               Hub?            @relation(fields: [hub_id], references: [id])
+  user              User            @relation(fields: [id], references: [id], onDelete: Cascade)
+  routes            Route[]
+
+  @@index([is_online])
+  @@map("riders")
+}
+
+model Shipment {
+  id                      String             @id @default(uuid())
+  tracking_number         String             @unique
+  merchant_id             String
+  rider_id                String?
+  recipient_name          String
+  recipient_phone         String
+  recipient_email         String?
+  pickup_address          String
+  pickup_latitude         Decimal?           @db.Decimal(10, 8)
+  pickup_longitude        Decimal?           @db.Decimal(11, 8)
+  delivery_address        String
+  delivery_latitude       Decimal?           @db.Decimal(10, 8)
+  delivery_longitude      Decimal?           @db.Decimal(11, 8)
+  package_type            String?
+  package_weight          Decimal?           @db.Decimal(8, 2)
+  package_value           Decimal?           @db.Decimal(10, 2)
+  special_instructions    String?
+  status                  String             @default("pending")
+  scheduled_pickup_time   DateTime?
+  scheduled_delivery_time DateTime?
+  actual_pickup_time      DateTime?
+  actual_delivery_time    DateTime?
+  delivery_fee            Decimal            @db.Decimal(10, 2)
+  cod_amount              Decimal            @default(0) @db.Decimal(10, 2)
+  payment_method          String?
+  payment_status          String             @default("pending")
+  qr_code_url             String?
+  qr_code_data            String?
+  distance_km             Decimal?           @db.Decimal(8, 2)
+  estimated_delivery_time Int?
+  created_at              DateTime           @default(now())
+  updated_at              DateTime           @updatedAt
+  chat_messages           ChatMessage[]
+  packages                Package[]
+  payments                Payment[]
+  rider_locations         RiderLocation[]
+  tracking_history        ShipmentTracking[]
+  merchant                User               @relation("MerchantShipments", fields: [merchant_id], references: [id])
+  rider                   User?              @relation("RiderShipments", fields: [rider_id], references: [id])
+  route_stops             RouteStop[]
+
+  @@index([merchant_id])
+  @@index([rider_id])
+  @@index([status])
+  @@index([tracking_number])
+  @@map("shipments")
+}
+
+model ShipmentTracking {
+  id                 String   @id @default(uuid())
+  shipment_id        String
+  status             String
+  location_latitude  Decimal? @db.Decimal(10, 8)
+  location_longitude Decimal? @db.Decimal(11, 8)
+  location_address   String?
+  notes              String?
+  updated_by         String?
+  created_at         DateTime @default(now())
+  shipment           Shipment @relation(fields: [shipment_id], references: [id], onDelete: Cascade)
+  updated_by_user    User?    @relation(fields: [updated_by], references: [id])
+
+  @@index([shipment_id])
+  @@index([created_at])
+  @@map("shipment_tracking")
+}
+
+model RiderLocation {
+  id          String    @id @default(uuid())
+  rider_id    String
+  shipment_id String?
+  latitude    Decimal   @db.Decimal(10, 8)
+  longitude   Decimal   @db.Decimal(11, 8)
+  accuracy    Decimal?  @db.Decimal(8, 2)
+  speed       Decimal?  @db.Decimal(8, 2)
+  heading     Decimal?  @db.Decimal(5, 2)
+  created_at  DateTime  @default(now())
+  rider       Rider     @relation(fields: [rider_id], references: [id], onDelete: Cascade)
+  shipment    Shipment? @relation(fields: [shipment_id], references: [id])
+
+  @@index([rider_id, created_at(sort: Desc)])
+  @@index([shipment_id, created_at(sort: Desc)])
+  @@map("rider_locations")
+}
+
+model WalletTransaction {
+  id                              String   @id @default(uuid())
+  user_id                         String
+  transaction_type                String
+  amount                          Decimal  @db.Decimal(10, 2)
+  balance_after                   Decimal  @db.Decimal(10, 2)
+  transaction_category            String?
+  reference_id                    String?
+  reference_type                  String?
+  description                     String?
+  payment_method                  String?
+  payment_provider_transaction_id String?
+  status                          String   @default("completed")
+  created_at                      DateTime @default(now())
+  user                            User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, created_at(sort: Desc)])
+  @@index([transaction_category])
+  @@map("wallet_transactions")
+}
+
+model Payment {
+  id                      String    @id @default(uuid())
+  user_id                 String
+  shipment_id             String?
+  amount                  Decimal   @db.Decimal(10, 2)
+  currency                String    @default("PKR")
+  payment_method          String
+  payment_provider        String?
+  provider_transaction_id String?
+  provider_response       Json?
+  status                  String    @default("pending")
+  failure_reason          String?
+  created_at              DateTime  @default(now())
+  updated_at              DateTime  @updatedAt
+  shipment                Shipment? @relation(fields: [shipment_id], references: [id])
+  user                    User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+  @@index([shipment_id])
+  @@index([status])
+  @@map("payments")
+}
+
+model Address {
+  id            String   @id @default(uuid())
+  user_id       String
+  label         String?
+  address_line1 String
+  address_line2 String?
+  city          String
+  state         String?
+  postal_code   String?
+  country       String   @default("Pakistan")
+  latitude      Decimal? @db.Decimal(10, 8)
+  longitude     Decimal? @db.Decimal(11, 8)
+  is_default    Boolean  @default(false)
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+  user          User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+  @@map("addresses")
+}
+
+model Notification {
+  id             String   @id @default(uuid())
+  user_id        String
+  title          String
+  message        String
+  type           String?
+  reference_id   String?
+  reference_type String?
+  is_read        Boolean  @default(false)
+  push_sent      Boolean  @default(false)
+  sms_sent       Boolean  @default(false)
+  email_sent     Boolean  @default(false)
+  created_at     DateTime @default(now())
+  user           User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, is_read, created_at(sort: Desc)])
+  @@map("notifications")
+}
+
+model ChatMessage {
+  id           String    @id @default(uuid())
+  sender_id    String
+  recipient_id String?
+  shipment_id  String?
+  message_type String    @default("text")
+  content      String
+  is_read      Boolean   @default(false)
+  created_at   DateTime  @default(now())
+  recipient    User?     @relation("ReceivedMessages", fields: [recipient_id], references: [id])
+  sender       User      @relation("SentMessages", fields: [sender_id], references: [id], onDelete: Cascade)
+  shipment     Shipment? @relation(fields: [shipment_id], references: [id])
+
+  @@index([sender_id, created_at(sort: Desc)])
+  @@index([recipient_id, created_at(sort: Desc)])
+  @@index([shipment_id])
+  @@map("chat_messages")
+}
+
+model Hub {
+  id         String   @id @default(uuid())
+  name       String
+  address    String
+  city       String
+  latitude   Decimal? @db.Decimal(10, 8)
+  longitude  Decimal? @db.Decimal(11, 8)
+  manager_id String?
+  is_active  Boolean  @default(true)
+  created_at DateTime @default(now())
+  capacity   Int      @default(100)
+  size_sqft  Int?     @default(5000)
+  manager    User?    @relation("HubManager", fields: [manager_id], references: [id])
+  riders     Rider[]
+  routes     Route[]
+
+  @@map("hubs")
+}
+
+model VerificationCode {
+  id         String   @id @default(uuid())
+  user_id    String?
+  email      String?
+  phone      String?
+  code       String
+  type       String
+  is_used    Boolean  @default(false)
+  expires_at DateTime
+  created_at DateTime @default(now())
+  user       User?    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([code, is_used, expires_at])
+  @@map("verification_codes")
+}
+
+model Package {
+  id             String    @id @default(uuid())
+  shipment_id    String
+  package_number Int
+  package_type   String?
+  package_weight Decimal?  @db.Decimal(8, 2)
+  package_value  Decimal?  @db.Decimal(10, 2)
+  package_size   String?
+  description    String?
+  barcode_number String    @unique
+  qr_code_url    String?
+  qr_code_data   String?
+  status         String    @default("pending")
+  scanned_at     DateTime?
+  scanned_by     String?
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @updatedAt
+  shipment       Shipment  @relation(fields: [shipment_id], references: [id], onDelete: Cascade)
+
+  @@index([shipment_id])
+  @@index([barcode_number])
+  @@index([status])
+  @@map("packages")
+}
+
+model SystemSetting {
+  id                  String   @id @default(uuid())
+  company_name        String   @default("Cod Express")
+  company_email       String   @default("support@codexpress.com")
+  company_phone       String   @default("+1 800-COD-EXPRESS")
+  company_address     String   @default("123 Logistics Street, New York, NY 1")
+  timezone            String   @default("Eastern Standard Time (EST)")
+  currency            String   @default("USD ($)")
+  
+  cod_commission      Decimal  @default(5.00) @db.Decimal(5, 2)
+  base_delivery_fee   Decimal  @default(5.00) @db.Decimal(10, 2)
+  min_order_value     Decimal  @default(10.00) @db.Decimal(10, 2)
+  rider_commission    Decimal  @default(70.00) @db.Decimal(5, 2)
+  agent_commission    Decimal  @default(5.00) @db.Decimal(5, 2)
+  
+  maintenance_mode    Boolean  @default(false)
+  auto_assignment     Boolean  @default(true)
+  gps_tracking        Boolean  @default(true)
+
+  email_notifications Boolean  @default(true)
+  sms_notifications   Boolean  @default(true)
+  
+  session_timeout     Int      @default(30)
+  two_factor_required_admins Boolean @default(false)
+
+  
+  updated_at          DateTime @updatedAt
+  
+  @@map("system_settings")
+}
+
+model CmsContent {
+  id              String   @id @default(uuid())
+  type            String   // FAQ, ANNOUNCEMENT, BANNER, LEGAL
+  title           String
+  content         String   @db.Text
+  category        String?
+  image_url       String?
+  views           Int      @default(0)
+  status          String   @default("published") // published, draft
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+
+  @@map("cms_contents")
+}
+
+model SupportTicket {
+  id             String           @id @default(uuid())
+  ticket_number  String           @unique // e.g., TKT-1001
+  user_id        String
+  subject        String
+  category       String
+  priority       String           @default("Medium") // Low, Medium, High
+  status         String           @default("Open")   // Open, In Progress, Resolved, Closed
+  assigned_to    String?
+  created_at     DateTime         @default(now())
+  updated_at     DateTime         @updatedAt
+  user           User             @relation("TicketsRaised", fields: [user_id], references: [id], onDelete: Cascade)
+  assignee       User?            @relation("TicketsAssigned", fields: [assigned_to], references: [id])
+  messages       SupportMessage[]
+
+  @@index([user_id])
+  @@index([assigned_to])
+  @@index([status])
+  @@map("support_tickets")
+}
+
+model SupportMessage {
+  id         String        @id @default(uuid())
+  ticket_id  String
+  sender_id  String
+  message    String        @db.Text
+  is_read    Boolean       @default(false)
+  created_at DateTime      @default(now())
+  ticket     SupportTicket @relation(fields: [ticket_id], references: [id], onDelete: Cascade)
+  sender     User          @relation(fields: [sender_id], references: [id], onDelete: Cascade)
+
+  @@index([ticket_id])
+  @@index([sender_id])
+  @@map("support_messages")
+}
+
+model Route {
+  id          String   @id @default(uuid())
+  name        String
+  hub_id      String?
+  rider_id    String?
+  vehicle_id  String?
+  status      String   @default("draft") // draft, active, completed, cancelled
+  distance_km Decimal? @db.Decimal(10, 2)
+  duration_min Int?
+  start_time  DateTime?
+  end_time    DateTime?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  hub         Hub?     @relation(fields: [hub_id], references: [id])
+  rider       Rider?   @relation(fields: [rider_id], references: [id])
+  stops       RouteStop[]
+
+  @@map("routes")
+}
+
+model RouteStop {
+  id          String    @id @default(uuid())
+  route_id    String
+  shipment_id String?
+  stop_order  Int
+  type        String    // pickup, delivery, waypoint
+  location    String?
+  latitude    Decimal?  @db.Decimal(10, 8)
+  longitude   Decimal?  @db.Decimal(11, 8)
+  arrival_time DateTime?
+  status      String    @default("pending") // pending, completed, skipped, failed
+
+  route       Route     @relation(fields: [route_id], references: [id], onDelete: Cascade)
+  shipment    Shipment? @relation(fields: [shipment_id], references: [id])
+
+  @@map("route_stops")
+}
+
+
+
