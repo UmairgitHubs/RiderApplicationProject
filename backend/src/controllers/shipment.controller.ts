@@ -45,9 +45,13 @@ export const createShipment = async (req: Request, res: Response) => {
       packageType,
       packageWeight,
       packageValue,
+      shipmentType, // Extract shipmentType
     } = req.body;
 
     const trackingNumber = generateTrackingNumber();
+
+    // Generate Batch ID if franchise
+    const batchId = shipmentType === 'franchise' ? `FR${new Date().getFullYear()}${Math.floor(Math.random() * 1000000)}` : null;
 
     let packagesArray = packages || [];
     
@@ -125,6 +129,7 @@ export const createShipment = async (req: Request, res: Response) => {
         }
     }
 
+    // Create Main Shipment
     const shipment = await prisma.shipment.create({
       data: {
         tracking_number: trackingNumber,
@@ -149,9 +154,39 @@ export const createShipment = async (req: Request, res: Response) => {
         payment_method: paymentMethod || 'wallet',
         status: initialStatus,
         payment_status: 'pending',
-        rider_id: assignedRiderId
-      },
+        rider_id: assignedRiderId,
+        // New Fields
+        batch_id: batchId,
+        shipment_type: shipmentType || 'individual'
+      } as any,
     });
+
+    // SIMULATION: If Franchise, create 2 more dummy shipments to simulate bulk import
+    if (shipmentType === 'franchise' && batchId) {
+      const dummyRecipients = [
+        { name: 'Michael Chen', loc: 'Queens, NY 11054' },
+        { name: 'Emily Rodriguez', loc: 'Manhattan, NY 10003' }
+      ];
+      
+      for (const recipient of dummyRecipients) {
+        const dummyTracking = generateTrackingNumber();
+        await prisma.shipment.create({
+          data: {
+            tracking_number: dummyTracking,
+            merchant_id: userId,
+            recipient_name: recipient.name,
+            recipient_phone: recipientPhone, // Reuse phone
+            pickup_address: pickupAddress,
+            delivery_address: recipient.loc,
+            package_type: packagesArray[0]?.packageType || null,
+            delivery_fee: deliveryFee,
+            status: 'in_transit', // Simulate active movement
+            batch_id: batchId,
+            shipment_type: 'franchise'
+          } as any
+        });
+      }
+    }
 
     const createdPackages = [];
     for (let i = 0; i < packagesArray.length; i++) {
@@ -252,14 +287,67 @@ export const createShipment = async (req: Request, res: Response) => {
   }
 };
 
+export const getShipmentStats = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.id;
+
+    const [active, delivered, total] = await Promise.all([
+      prisma.shipment.count({
+        where: {
+          merchant_id: userId,
+          status: {
+            in: ['pending', 'assigned', 'picked_up', 'in_transit'],
+          },
+        },
+      }),
+      prisma.shipment.count({
+        where: {
+          merchant_id: userId,
+          status: 'delivered',
+        },
+      }),
+      prisma.shipment.count({
+        where: {
+          merchant_id: userId,
+        },
+      }),
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        active,
+        delivered,
+        total,
+      },
+    });
+  } catch (error: any) {
+    logger.error('Get shipment stats error:', error);
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'An error occurred while fetching shipment stats.',
+      },
+    });
+  }
+};
+
 export const getMerchantShipments = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user?.id;
-    const { status, page = 1, limit = 20 } = req.query;
+    const { status, page = 1, limit = 20, search } = req.query;
 
     const where: any = { merchant_id: userId };
     if (status && status !== 'all') {
       where.status = status;
+    }
+
+    if (search) {
+      where.OR = [
+        { tracking_number: { contains: search as string, mode: 'insensitive' } },
+        { recipient_name: { contains: search as string, mode: 'insensitive' } },
+      ];
     }
 
     const skip = (parseInt(page as string) - 1) * parseInt(limit as string);

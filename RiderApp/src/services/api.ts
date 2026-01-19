@@ -15,7 +15,7 @@ const COMPUTER_IP = "192.168.100.223"; // Update this if your IP changes
 const getApiBaseUrl = () => {
   if (__DEV__) {
     // Check Platform.OS FIRST (more reliable than window check)
-    const platform = Platform.OS;
+    const platform = Platform.OS as string;
     console.log("📱 Platform.OS:", platform);
     console.log("🌐 typeof window:", typeof window);
 
@@ -26,10 +26,6 @@ const getApiBaseUrl = () => {
       console.log("🤖 Android detected - Using computer IP:", url);
       console.log("💡 If this doesn't work, try: http://10.0.2.2:3000/api/v1");
       return url;
-      // Alternative: Use 10.0.2.2 for emulator only
-      // const url = 'http://10.0.2.2:3000/api/v1';
-      // console.log('🤖 Android detected - Using emulator IP:', url);
-      // return url;
     }
 
     // For iOS
@@ -40,6 +36,8 @@ const getApiBaseUrl = () => {
     }
 
     // For web - only if Platform.OS is 'web' (not just if window exists)
+    // Note: TypeScript might complain about checks that seem impossible on some platforms
+    // but in React Native we need these runtime checks.
     if (
       platform === "web" ||
       (typeof window !== "undefined" &&
@@ -92,9 +90,9 @@ class ApiClient {
   ): Promise<T> {
     const token = await getAuthToken();
 
-    const headers: HeadersInit = {
+    const headers: Record<string, string> = {
       "Content-Type": "application/json",
-      ...options.headers,
+      ...(options.headers as Record<string, string>),
     };
 
     if (token) {
@@ -119,8 +117,6 @@ class ApiClient {
         ...options,
         headers,
         signal: controller.signal,
-        // Add timeout for Android
-        timeout: 60000,
       });
 
       clearTimeout(timeoutId);
@@ -241,12 +237,16 @@ export const shipmentApi = {
   track: async (trackingNumber: string) => {
     return api.get(`/shipments/track/${trackingNumber}`);
   },
+
+  getStats: async () => {
+    return api.get('/shipments/stats');
+  },
 };
 
 // Auth API
 export const authApi = {
   login: async (email: string, password: string) => {
-    const response = await api.post("/auth/login", { email, password });
+    const response = await api.post<any>("/auth/login", { email, password });
     // Store token and user data
     if (response.success && response.data?.token) {
       await AsyncStorage.setItem("@auth_token", response.data.token);
@@ -274,7 +274,7 @@ export const authApi = {
     role: "merchant" | "rider";
     businessName?: string;
   }) => {
-    const response = await api.post("/auth/register", data);
+    const response = await api.post<any>("/auth/register", data);
     // Store token if provided
     if (response.success && response.data?.token) {
       await AsyncStorage.setItem("@auth_token", response.data.token);
@@ -459,15 +459,23 @@ export const chatApi = {
     return api.post("/chat/support/messages", data);
   },
 
-  // Mark messages as read
-  markAsRead: async (messageId: string) => {
-    return api.put(`/chat/messages/${messageId}/read`);
+  // Mark all notifications as read
+  markAllAsRead: async () => {
+    return api.put('/notifications/mark-all-read', {});
   },
 
-  // Get all conversations (for future use)
-  getConversations: async () => {
-    return api.get("/chat/conversations");
+  // Shipment specific methods
+  getShipmentMessages: async (shipmentId: string) => {
+    return api.get<{ success: boolean; data: any[] }>(`/chat/conversations/${shipmentId}`);
   },
+
+  sendShipmentMessage: async (data: { shipmentId: string; content: string; recipientId?: string }) => {
+    return api.post(`/chat/messages`, data);
+  },
+
+  markShipmentRead: async (shipmentId: string) => {
+    return api.patch(`/chat/conversations/${shipmentId}/read`, {});
+  }
 };
 
 // Rider API
@@ -559,12 +567,12 @@ export const notificationsApi = {
 
   // Mark notification as read
   markAsRead: async (notificationId: string) => {
-    return api.patch(`/notifications/${notificationId}/read`);
+    return api.patch(`/notifications/${notificationId}/read`, {});
   },
 
   // Mark all notifications as read
   markAllAsRead: async () => {
-    return api.patch("/notifications/read-all");
+    return api.patch("/notifications/read-all", {});
   },
 
   // Delete notification

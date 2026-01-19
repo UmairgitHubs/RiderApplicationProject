@@ -64,13 +64,13 @@ export default function FranchiseShipmentScreen({ navigation, route }: any) {
       
       // Try to get merchant profile and default address
       try {
-        const profileResponse = await api.get('/profile');
+        const profileResponse = await api.get('/profile') as any;
         if (profileResponse.success && profileResponse.data) {
           const profile = profileResponse.data;
           
           // Try to get default address
           try {
-            const addressesResponse = await api.get('/profile/addresses');
+            const addressesResponse = await api.get('/profile/addresses') as any;
             if (addressesResponse.success && addressesResponse.data?.length > 0) {
               const defaultAddress = addressesResponse.data.find((addr: any) => addr.isDefault) || addressesResponse.data[0];
               setPickupAddress({
@@ -218,11 +218,12 @@ export default function FranchiseShipmentScreen({ navigation, route }: any) {
         numberOfPackages: numberOfPackages ? parseInt(numberOfPackages) : 1,
         dimensions: dimensions,
         excelFile: excelFile ? excelFile.uri : undefined,
+        shipmentType: 'franchise',
       };
 
       console.log('Creating franchise shipment:', shipmentData);
 
-      const response = await shipmentApi.create(shipmentData);
+      const response = await shipmentApi.create(shipmentData) as any;
 
       if (response.success) {
         // Navigate to success screen with tracking number

@@ -6,6 +6,7 @@ import {
   trackShipment,
   updateShipmentStatus,
   cancelShipment,
+  getShipmentStats,
 } from '../controllers/shipment.controller';
 import { authenticate } from '../middleware/auth.middleware';
 import { validateCreateShipment } from '../middleware/validation.middleware';
@@ -16,6 +17,7 @@ const router = Router();
 router.use(authenticate);
 
 router.post('/', validateCreateShipment, createShipment);
+router.get('/stats', getShipmentStats);
 router.get('/', getMerchantShipments);
 router.get('/:id', getShipmentDetails);
 router.get('/track/:trackingNumber', trackShipment);

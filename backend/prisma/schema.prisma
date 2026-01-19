@@ -162,6 +162,8 @@ model Shipment {
   package_value           Decimal?           @db.Decimal(10, 2)
   special_instructions    String?
   status                  String             @default("pending")
+  batch_id                String?
+  shipment_type           String             @default("individual")
   scheduled_pickup_time   DateTime?
   scheduled_delivery_time DateTime?
   actual_pickup_time      DateTime?
@@ -189,6 +191,7 @@ model Shipment {
   @@index([rider_id])
   @@index([status])
   @@index([tracking_number])
+  @@index([batch_id])
   @@map("shipments")
 }
 

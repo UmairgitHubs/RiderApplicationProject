@@ -5,22 +5,36 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Platform,
   Modal,
   Animated,
-  Dimensions,
   ActivityIndicator,
   RefreshControl,
+  useWindowDimensions,
+  Platform,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { colors, typography, spacing, borderRadius } from '../../theme';
-import { shipmentApi } from '../../services/api';
+import { useMerchantDashboard } from '../../hooks/useMerchantDashboard';
 
-const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+// --- Constants & Config ---
+const FRANCHISE_PURPLE = '#7C4DFF';
+const FRANCHISE_BG = '#F3E5F5';
 
-// Status mapping
+// Mock Data for Decoration (matches user request)
+const MOCK_BULK_ORDER = {
+  id: 'FR2024090176543',
+  status: 'active',
+  pieces: 6,
+  destinations: [
+    { id: 1, name: 'Sarah Williams', location: 'Brooklyn, NY 11201', tracking: 'CE2024-FR-001' },
+    { id: 2, name: 'Michael Chen', location: 'Queens, NY 11054', tracking: 'CE2024-FR-002' },
+    { id: 3, name: 'Emily Rodriguez', location: 'Manhattan, NY 10003', tracking: 'CE2024-FR-003' },
+  ]
+};
+
 const getStatusInfo = (status: string) => {
   const statusMap: { [key: string]: { label: string; color: string } } = {
     pending: { label: 'Pending Pickup', color: '#FF9800' },
@@ -37,14 +51,24 @@ const getStatusInfo = (status: string) => {
 export default function MerchantHome() {
   const navigation = useNavigation<any>();
   const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
+  const { height: SCREEN_HEIGHT } = useWindowDimensions();
+  
+  const { 
+    stats, 
+    activeShipment, 
+    activeBulkOrder, // Now available
+    recentShipments, 
+    loading, 
+    refreshing, 
+    onRefresh 
+  } = useMerchantDashboard();
+
   const [showShipmentModal, setShowShipmentModal] = useState(false);
   const [slideAnim] = useState(new Animated.Value(SCREEN_HEIGHT));
-  const [shipments, setShipments] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [stats, setStats] = useState({ active: 0, delivered: 0 });
 
   const openModal = () => {
+    slideAnim.setValue(SCREEN_HEIGHT);
     setShowShipmentModal(true);
     Animated.spring(slideAnim, {
       toValue: 0,
@@ -66,58 +90,11 @@ export default function MerchantHome() {
 
   const handleShipmentTypeSelect = (type: 'franchise' | 'individual') => {
     closeModal();
-    // Navigate to CreateShipment with type parameter
     const parent = navigation.getParent();
     if (parent) {
       parent.navigate('CreateShipment', { shipmentType: type });
     }
   };
-
-  const fetchShipments = async () => {
-    try {
-      const response = await shipmentApi.getAll({ limit: 20 });
-      if (response.success && response.data?.shipments) {
-        const allShipments = response.data.shipments;
-        setShipments(allShipments);
-
-        // Calculate stats
-        const activeCount = allShipments.filter(
-          (s: any) => !['delivered', 'cancelled', 'returned'].includes(s.status)
-        ).length;
-        const deliveredCount = allShipments.filter(
-          (s: any) => s.status === 'delivered'
-        ).length;
-        setStats({ active: activeCount, delivered: deliveredCount });
-      }
-    } catch (error) {
-      console.error('Error fetching shipments:', error);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
-
-  // Fetch shipments on mount and when screen comes into focus
-  useFocusEffect(
-    React.useCallback(() => {
-      fetchShipments();
-    }, [])
-  );
-
-  const onRefresh = () => {
-    setRefreshing(true);
-    fetchShipments();
-  };
-
-  // Get active shipment for live tracking (first in_transit or picked_up)
-  const activeShipment = shipments.find(
-    (s: any) => s.status === 'in_transit' || s.status === 'picked_up' || s.status === 'assigned'
-  );
-
-  // Get recent shipments (excluding the active one)
-  const recentShipments = shipments
-    .filter((s: any) => s.id !== activeShipment?.id)
-    .slice(0, 3);
 
   const getRiderInitial = (rider: any) => {
     if (!rider?.full_name) return 'R';
@@ -125,20 +102,15 @@ export default function MerchantHome() {
   };
 
   const formatPrice = (amount: any) => {
-    if (amount === null || amount === undefined) {
-      return 'PKR 0.00';
-    }
+    if (amount === null || amount === undefined) return 'PKR 0.00';
     const numAmount = typeof amount === 'string' ? parseFloat(amount) : Number(amount);
-    if (isNaN(numAmount)) {
-      return 'PKR 0.00';
-    }
-    return `PKR ${numAmount.toFixed(2)}`;
+    return isNaN(numAmount) ? 'PKR 0.00' : `PKR ${numAmount.toFixed(2)}`;
   };
 
   return (
     <View style={styles.container}>
-      {/* Orange Header */}
-      <View style={styles.header}>
+      {/* ... (Header) ... */}
+      <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
         <View style={styles.headerTop}>
           <View>
             <Text style={styles.headerTitle}>{t('home.dashboard')}</Text>
@@ -170,14 +142,11 @@ export default function MerchantHome() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} />
         }
       >
         {/* Create New Shipment Card */}
-        <TouchableOpacity 
-          style={styles.createShipmentCard}
-          onPress={openModal}
-        >
+        <TouchableOpacity style={styles.createShipmentCard} onPress={openModal}>
           <View style={styles.createShipmentIcon}>
             <Ionicons name="add" size={32} color={colors.textWhite} />
           </View>
@@ -193,94 +162,190 @@ export default function MerchantHome() {
             <ActivityIndicator size="large" color={colors.primary} />
           </View>
         ) : activeShipment ? (
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>{t('home.liveTracking')}</Text>
-            <View style={styles.badge}>
-                <Text style={styles.badgeText}>{stats.active} {t('home.active')}</Text>
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>{t('home.liveTracking')}</Text>
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>1 Active</Text>
+              </View>
             </View>
-          </View>
-          <View style={styles.trackingCard}>
-            <View style={styles.trackingHeader}>
-              <Ionicons name="paper-plane-outline" size={20} color={colors.primary} />
+            <View style={styles.trackingCard}>
+              <View style={styles.trackingHeader}>
+                <Ionicons name="paper-plane-outline" size={20} color={colors.primary} />
                 <Text style={styles.trackingId}>{activeShipment.trackingNumber}</Text>
                 <View style={[styles.statusBadge, { backgroundColor: getStatusInfo(activeShipment.status).color }]}>
                   <Text style={styles.statusBadgeText}>{getStatusInfo(activeShipment.status).label}</Text>
                 </View>
               </View>
               <Text style={styles.trackingRecipient}>To: {activeShipment.recipientName}</Text>
-              {activeShipment.rider ? (
-            <View style={styles.riderInfo}>
-              <View style={styles.riderAvatar}>
+              
+              {activeShipment.rider && (
+                <View style={styles.riderInfo}>
+                  <View style={styles.riderAvatar}>
                     <Text style={styles.riderInitial}>{getRiderInitial(activeShipment.rider)}</Text>
-              </View>
-              <View style={styles.riderDetails}>
+                  </View>
+                  <View style={styles.riderDetails}>
                     <Text style={styles.riderName}>{activeShipment.rider.full_name || 'Rider'}</Text>
-                <Text style={styles.riderSubtitle}>Your rider</Text>
+                    <Text style={styles.riderSubtitle}>Your rider • 8 min away</Text>
+                  </View>
+                </View>
+              )}
+              
+              <View style={styles.addressRow}>
+                <Ionicons name="location" size={16} color={colors.error} />
+                <Text style={styles.address} numberOfLines={1}>{activeShipment.deliveryAddress}</Text>
               </View>
+              
+              <TouchableOpacity 
+                style={styles.trackButton}
+                onPress={() => {
+                  const parent = navigation.getParent();
+                  if (parent) parent.navigate('ShipmentTracking', { shipmentId: activeShipment.id });
+                }}
+              >
+                <Ionicons name="map-outline" size={16} color={colors.textWhite} />
+                <Text style={styles.trackButtonText}>{t('home.trackOnMap')}</Text>
+              </TouchableOpacity>
             </View>
-              ) : null}
-            <View style={styles.addressRow}>
-              <Ionicons name="location" size={16} color={colors.error} />
-                <Text style={styles.address}>{activeShipment.deliveryAddress}</Text>
-            </View>
-            <TouchableOpacity 
-              style={styles.trackButton}
-              onPress={() => {
-                const parent = navigation.getParent();
-                  if (parent) parent.navigate('ShipmentDetails', { shipmentId: activeShipment.id });
-              }}
-            >
-              <Ionicons name="location" size={16} color={colors.textWhite} />
-              <Text style={styles.trackButtonText}>{t('home.trackOnMap')}</Text>
-            </TouchableOpacity>
           </View>
-        </View>
         ) : null}
 
         {/* Recent Shipments Section */}
         {recentShipments.length > 0 && (
-        <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>{t('home.recentShipments')}</Text>
-          <TouchableOpacity onPress={() => {
-            const parent = navigation.getParent();
-            if (parent) parent.navigate('ShipmentsList');
-          }}>
-            <Text style={styles.viewAllText}>{t('home.viewAll')}</Text>
-          </TouchableOpacity>
-        </View>
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>{t('home.recentShipments')}</Text>
+              <TouchableOpacity onPress={() => {
+                const parent = navigation.getParent();
+                if (parent) parent.navigate('ShipmentsList');
+              }}>
+                <Text style={styles.viewAllText}>{t('home.viewAll')}</Text>
+              </TouchableOpacity>
+            </View>
             {recentShipments.map((shipment: any, index: number) => (
               <View 
                 key={shipment.id} 
                 style={[styles.shipmentCard, index < recentShipments.length - 1 && styles.shipmentCardSpacing]}
               >
-            <View style={styles.shipmentHeader}>
+                <View style={styles.shipmentHeader}>
                   <Text style={styles.shipmentTrackingId}>{shipment.trackingNumber}</Text>
                   <View style={[styles.statusBadge, { backgroundColor: getStatusInfo(shipment.status).color }]}>
                     <Text style={styles.statusBadgeText}>{getStatusInfo(shipment.status).label}</Text>
-              </View>
-            </View>
+                  </View>
+                </View>
                 <Text style={styles.shipmentRecipient}>{shipment.recipientName}</Text>
-                <Text style={styles.shipmentAddress}>{shipment.deliveryAddress}</Text>
-            <View style={styles.shipmentDetails}>
+                <Text style={styles.shipmentAddress} numberOfLines={1}>{shipment.deliveryAddress}</Text>
+                <View style={styles.shipmentDetails}>
                   <Text style={styles.shipmentItem}>{shipment.packageCount || 1} package{shipment.packageCount > 1 ? 's' : ''}</Text>
                   <Text style={styles.shipmentPrice}>{formatPrice(shipment.codAmount || shipment.deliveryFee || 0)}</Text>
-            </View>
-            <TouchableOpacity 
-              style={styles.shipmentTrackButton}
-              onPress={() => {
-                const parent = navigation.getParent();
-                    if (parent) parent.navigate('ShipmentDetails', { shipmentId: shipment.id });
-              }}
-            >
-              <Ionicons name="paper-plane-outline" size={16} color={colors.textWhite} />
-              <Text style={styles.shipmentTrackButtonText}>Track Shipment</Text>
-            </TouchableOpacity>
-          </View>
+                </View>
+                <TouchableOpacity 
+                  style={styles.shipmentTrackButton}
+                  onPress={() => {
+                    const parent = navigation.getParent();
+                    if (parent) parent.navigate('ShipmentTracking', { shipmentId: shipment.id });
+                  }}
+                >
+                  <Ionicons name="paper-plane-outline" size={16} color={colors.textWhite} />
+                  <Text style={styles.shipmentTrackButtonText}>Track Shipment</Text>
+                </TouchableOpacity>
+              </View>
             ))}
+          </View>
+        )}
+
+        {/* Franchise Bulk Order Card (REAL DATA) */}
+        {activeBulkOrder && (
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Franchise Bulk Order</Text>
+            <View style={[styles.badge, { backgroundColor: '#E1BEE7' }]}>
+               <Text style={[styles.badgeText, { color: FRANCHISE_PURPLE }]}>Active</Text>
+            </View>
+          </View>
+
+          <View style={styles.bulkOrderCard}>
+            {/* Header */}
+            <View style={styles.bulkHeader}>
+              <View style={styles.bulkIconContainer}>
+                <Ionicons name="business" size={24} color={colors.textWhite} />
+              </View>
+              <View style={styles.bulkHeaderText}>
+                <Text style={styles.bulkTitle}>Bulk Franchise Order</Text>
+                <Text style={styles.bulkSubtitle}>Multiple customers • Hub routed</Text>
+              </View>
+            </View>
+
+            {/* Order ID */}
+            <View style={styles.bulkIdContainer}>
+              <View>
+                <Text style={styles.bulkLabel}>Franchise Order ID</Text>
+                <Text style={styles.bulkValue}>{activeBulkOrder.id}</Text>
+              </View>
+              <View style={styles.outForDeliveryBadge}>
+                <Text style={styles.outForDeliveryText}>Out for Delivery</Text>
+              </View>
+            </View>
+
+            <Text style={styles.piecesText}>{activeBulkOrder.pieces} pieces • {activeBulkOrder.pieces} different customers</Text>
+
+            {/* Destinations List */}
+            <View style={styles.destinationsContainer}>
+              <Text style={styles.destinationsTitle}>Delivery Destinations (All Trackable):</Text>
+              {activeBulkOrder.destinations.map((dest: any) => (
+                <View key={dest.id} style={styles.destinationRow}>
+                  <View style={styles.destNumberContainer}>
+                    <Text style={styles.destNumber}>{dest.id}</Text>
+                  </View>
+                  <View style={styles.destInfo}>
+                    <Text style={styles.destName}>{dest.name}</Text>
+                    <Text style={styles.destLocation} numberOfLines={1}>{dest.location}</Text>
+                    <Text style={styles.destTracking}>{dest.tracking}</Text>
+                  </View>
+                  <Ionicons name="paper-plane-outline" size={16} color={FRANCHISE_PURPLE} />
+                </View>
+              ))}
+            </View>
+
+            {/* Delivery Flow */}
+            <View style={styles.flowContainer}>
+              <Text style={styles.flowTitle}>Delivery Flow:</Text>
+              
+              <View style={styles.flowStep}>
+                <Ionicons name="checkmark-circle" size={20} color={colors.success} />
+                <Text style={styles.flowText}>Merchant → Pickup Rider → Hub</Text>
+              </View>
+              
+              <View style={styles.flowConnector}>
+                 <View style={styles.dottedLine} />
+                 <Text style={styles.flowConnectorText}>Sorted & assigned at hub</Text>
+              </View>
+
+              <View style={styles.flowStep}>
+                <Ionicons name="radio-button-on" size={20} color="#FF9800" />
+                <Text style={[styles.flowText, { color: '#FF9800' }]}>Hub → Delivery Riders → Customers</Text>
+              </View>
+            </View>
+
+            {/* Info Box */}
+            <View style={styles.infoBox}>
+              <Text style={styles.infoTitle}>📦 Franchise Delivery Info:</Text>
+              <Text style={styles.infoText}>• Each piece goes to a different customer</Text>
+              <Text style={styles.infoText}>• All {activeBulkOrder.pieces} pieces have unique tracking numbers</Text>
+              <Text style={styles.infoText}>• All pieces routed through Hub</Text>
+              <Text style={styles.infoText}>• Separate delivery riders per area</Text>
+            </View>
+
+            {/* Track All Button */}
+            <TouchableOpacity style={styles.bulkTrackButton} onPress={() => {}}>
+               <Ionicons name="git-branch-outline" size={20} color={colors.textWhite} />
+               <Text style={styles.bulkTrackButtonText}>Track All {activeBulkOrder.pieces} Orders</Text>
+            </TouchableOpacity>
+
+          </View>
         </View>
         )}
+
       </ScrollView>
 
       {/* Shipment Type Selection Modal */}
@@ -290,7 +355,7 @@ export default function MerchantHome() {
         animationType="none"
         onRequestClose={closeModal}
       >
-            <TouchableOpacity 
+        <TouchableOpacity 
           style={styles.modalOverlay}
           activeOpacity={1}
           onPress={closeModal}
@@ -300,24 +365,21 @@ export default function MerchantHome() {
               style={[
                 styles.modalContent,
                 {
+                  maxHeight: SCREEN_HEIGHT * 0.8,
+                  paddingBottom: Math.max(insets.bottom, spacing.xl),
                   transform: [{ translateY: slideAnim }],
                 },
               ]}
             >
-              {/* Handle */}
               <View style={styles.modalHandle} />
-
-              {/* Title */}
               <Text style={styles.modalTitle}>Create Shipment</Text>
               <Text style={styles.modalSubtitle}>Choose your shipment type</Text>
 
-              {/* Shipment Type Options */}
               <View style={styles.shipmentTypeContainer}>
-                {/* Franchise Option */}
                 <TouchableOpacity
                   style={[styles.shipmentTypeButton, styles.franchiseButton]}
                   onPress={() => handleShipmentTypeSelect('franchise')}
-            >
+                >
                   <View style={styles.shipmentTypeIcon}>
                     <Ionicons name="cube-outline" size={28} color={colors.textWhite} />
                   </View>
@@ -325,9 +387,8 @@ export default function MerchantHome() {
                     <Text style={styles.shipmentTypeTitle}>Franchise</Text>
                     <Text style={styles.shipmentTypeSubtitle}>Bulk shipments • Excel upload</Text>
                   </View>
-            </TouchableOpacity>
+                </TouchableOpacity>
 
-                {/* Individual Option */}
                 <TouchableOpacity
                   style={[styles.shipmentTypeButton, styles.individualButton]}
                   onPress={() => handleShipmentTypeSelect('individual')}
@@ -338,17 +399,16 @@ export default function MerchantHome() {
                   <View style={styles.shipmentTypeTextContainer}>
                     <Text style={styles.shipmentTypeTitle}>Individual</Text>
                     <Text style={styles.shipmentTypeSubtitle}>Single parcel • Quick delivery</Text>
-          </View>
+                  </View>
                 </TouchableOpacity>
               </View>
 
-              {/* Cancel Button */}
               <TouchableOpacity style={styles.cancelButton} onPress={closeModal}>
                 <Text style={styles.cancelButtonText}>Cancel</Text>
               </TouchableOpacity>
             </Animated.View>
           </TouchableOpacity>
-            </TouchableOpacity>
+        </TouchableOpacity>
       </Modal>
     </View>
   );
@@ -361,9 +421,11 @@ const styles = StyleSheet.create({
   },
   header: {
     backgroundColor: colors.primary,
-    paddingTop: Platform.OS === 'ios' ? 50 : 30,
     paddingBottom: spacing.xl,
     paddingHorizontal: spacing.lg,
+    borderBottomLeftRadius: 30, // Rounded header
+    borderBottomRightRadius: 30, // Rounded header
+    zIndex: 10,
   },
   headerTop: {
     flexDirection: 'row',
@@ -372,7 +434,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   headerTitle: {
-    fontSize: typography.fontSize['2xl'],
+    fontSize: typography.fontSize['3xl'], // Increased size
     fontWeight: typography.fontWeight.bold,
     color: colors.textWhite,
     marginBottom: spacing.xs,
@@ -388,13 +450,15 @@ const styles = StyleSheet.create({
   },
   statCard: {
     flex: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderRadius: borderRadius.md,
+    backgroundColor: 'rgba(255, 255, 255, 0.25)', // Slightly more visible
+    borderRadius: borderRadius.lg,
     padding: spacing.md,
-    alignItems: 'center',
+    alignItems: 'flex-start', // Left aligned like screenshot
+    height: 100,
+    justifyContent: 'space-between',
   },
   statNumber: {
-    fontSize: typography.fontSize['3xl'],
+    fontSize: typography.fontSize['4xl'],
     fontWeight: typography.fontWeight.bold,
     color: colors.textWhite,
   },
@@ -402,13 +466,15 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.sm,
     color: colors.textWhite,
     opacity: 0.9,
-    marginTop: spacing.xs,
+    fontWeight: typography.fontWeight.medium,
   },
   scrollView: {
     flex: 1,
+    marginTop: spacing.md,
   },
   scrollContent: {
     padding: spacing.lg,
+    paddingBottom: 100,
   },
   createShipmentCard: {
     flexDirection: 'row',
@@ -418,14 +484,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: spacing.xl,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 4 }, // Elevated
     shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowRadius: 8,
+    elevation: 4,
+    borderWidth: 1,
+    borderColor: '#EEEEEE',
   },
   createShipmentIcon: {
-    width: 60,
-    height: 60,
+    width: 50,
+    height: 50,
     backgroundColor: colors.primary,
     borderRadius: borderRadius.md,
     justifyContent: 'center',
@@ -460,21 +528,23 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   badge: {
-    backgroundColor: colors.success,
-    paddingHorizontal: spacing.sm,
+    backgroundColor: '#E8F5E9',
+    paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
     borderRadius: borderRadius.full,
   },
   badgeText: {
     fontSize: typography.fontSize.xs,
-    color: colors.textWhite,
-    fontWeight: typography.fontWeight.medium,
+    color: colors.success,
+    fontWeight: typography.fontWeight.bold,
   },
   viewAllText: {
     fontSize: typography.fontSize.sm,
     color: colors.primary,
-    fontWeight: typography.fontWeight.medium,
+    fontWeight: typography.fontWeight.bold,
   },
+  
+  // -- Tracking Card Refinements --
   trackingCard: {
     backgroundColor: colors.background,
     borderRadius: borderRadius.lg,
@@ -484,50 +554,46 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
+    borderWidth: 1,
+    borderColor: '#E3F2FD', // Light blue tint
   },
   trackingHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: spacing.sm,
+    marginBottom: spacing.md,
     gap: spacing.sm,
   },
   trackingId: {
-    fontSize: typography.fontSize.base,
-    fontWeight: typography.fontWeight.medium,
-    color: colors.text,
+    fontSize: typography.fontSize.lg,
+    fontWeight: typography.fontWeight.bold,
+    color: '#1565C0', // Blue Text
     flex: 1,
-  },
-  statusBadge: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    borderRadius: borderRadius.sm,
-  },
-  statusBadgeText: {
-    fontSize: typography.fontSize.xs,
-    color: colors.textWhite,
-    fontWeight: typography.fontWeight.medium,
   },
   trackingRecipient: {
     fontSize: typography.fontSize.base,
     color: colors.text,
-    marginBottom: spacing.md,
+    marginBottom: spacing.lg,
+    fontWeight: typography.fontWeight.medium,
   },
   riderInfo: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: spacing.md,
-    gap: spacing.sm,
+    gap: spacing.md,
+    backgroundColor: '#F5F5F5',
+    padding: spacing.sm,
+    borderRadius: borderRadius.md,
   },
   riderAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
   },
   riderInitial: {
-    fontSize: typography.fontSize.base,
+    fontSize: typography.fontSize.lg,
     fontWeight: typography.fontWeight.bold,
     color: colors.textWhite,
   },
@@ -536,42 +602,42 @@ const styles = StyleSheet.create({
   },
   riderName: {
     fontSize: typography.fontSize.base,
-    fontWeight: typography.fontWeight.medium,
+    fontWeight: typography.fontWeight.bold,
     color: colors.text,
   },
   riderSubtitle: {
     fontSize: typography.fontSize.xs,
-    color: colors.textLight,
-  },
-  riderDistance: {
-    fontSize: typography.fontSize.xs,
-    color: colors.textLight,
+    color: colors.success, // Green text for "x min away"
+    fontWeight: typography.fontWeight.bold,
   },
   addressRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: spacing.md,
-    gap: spacing.xs,
+    marginBottom: spacing.lg,
+    gap: spacing.sm,
   },
   address: {
     fontSize: typography.fontSize.sm,
-    color: colors.textLight,
+    color: colors.text,
     flex: 1,
+    fontWeight: typography.fontWeight.medium,
   },
   trackButton: {
     backgroundColor: colors.primary,
-    borderRadius: borderRadius.md,
+    borderRadius: borderRadius.lg, // Fully rounded
     padding: spacing.md,
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    gap: spacing.xs,
+    gap: spacing.sm,
   },
   trackButtonText: {
     color: colors.textWhite,
     fontSize: typography.fontSize.base,
-    fontWeight: typography.fontWeight.medium,
+    fontWeight: typography.fontWeight.bold,
   },
+  
+  // -- Standard Shipment Card --
   shipmentCard: {
     backgroundColor: colors.background,
     borderRadius: borderRadius.lg,
@@ -594,18 +660,28 @@ const styles = StyleSheet.create({
   },
   shipmentTrackingId: {
     fontSize: typography.fontSize.base,
-    fontWeight: typography.fontWeight.medium,
+    fontWeight: typography.fontWeight.bold,
     color: colors.text,
     flex: 1,
   },
+  statusBadge: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: borderRadius.sm,
+  },
+  statusBadgeText: {
+    fontSize: typography.fontSize.xs,
+    color: colors.textWhite,
+    fontWeight: typography.fontWeight.bold,
+  },
   shipmentRecipient: {
-    fontSize: typography.fontSize.base,
-    fontWeight: typography.fontWeight.medium,
+    fontSize: typography.fontSize.sm, // Smaller name
+    fontWeight: typography.fontWeight.bold,
     color: colors.text,
     marginBottom: spacing.xs,
   },
   shipmentAddress: {
-    fontSize: typography.fontSize.sm,
+    fontSize: typography.fontSize.xs,
     color: colors.textLight,
     marginBottom: spacing.md,
   },
@@ -614,10 +690,14 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: '#F5F5F5',
+    paddingTop: spacing.sm,
   },
   shipmentItem: {
     fontSize: typography.fontSize.sm,
-    color: colors.textLight,
+    color: colors.text,
+    fontWeight: typography.fontWeight.medium,
   },
   shipmentPrice: {
     fontSize: typography.fontSize.base,
@@ -626,7 +706,7 @@ const styles = StyleSheet.create({
   },
   shipmentTrackButton: {
     backgroundColor: colors.primary,
-    borderRadius: borderRadius.md,
+    borderRadius: borderRadius.full,
     padding: spacing.sm,
     flexDirection: 'row',
     justifyContent: 'center',
@@ -636,9 +716,230 @@ const styles = StyleSheet.create({
   shipmentTrackButtonText: {
     color: colors.textWhite,
     fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.medium,
+    fontWeight: typography.fontWeight.bold,
   },
-  // Modal Styles
+
+  // -- Bulk Order Card Styles -- 
+  bulkOrderCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: borderRadius.xl,
+    padding: spacing.lg,
+    shadowColor: '#7C4DFF',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.1,
+    shadowRadius: 16,
+    elevation: 8,
+    borderWidth: 1,
+    borderColor: '#E1BEE7', // Soft purple border
+    marginBottom: spacing.xl,
+  },
+  bulkHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+    gap: spacing.md,
+  },
+  bulkIconContainer: {
+    width: 52,
+    height: 52,
+    borderRadius: 16,
+    backgroundColor: '#9575CD', // Lighter purple icon bg
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  bulkHeaderText: {
+    flex: 1,
+  },
+  bulkTitle: {
+    fontSize: typography.fontSize.lg,
+    fontWeight: typography.fontWeight.bold,
+    color: '#4A148C', // Deep Purple
+    marginBottom: 2,
+  },
+  bulkSubtitle: {
+    fontSize: typography.fontSize.sm,
+    color: '#7B1FA2',
+    opacity: 0.8,
+  },
+  bulkIdContainer: {
+    backgroundColor: '#FAFAFA',
+    padding: spacing.md,
+    borderRadius: borderRadius.lg,
+    marginBottom: spacing.md,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#F5F5F5',
+  },
+  bulkLabel: {
+    fontSize: typography.fontSize.xs,
+    color: colors.textLight,
+  },
+  bulkValue: {
+    fontSize: typography.fontSize.base,
+    fontWeight: typography.fontWeight.bold,
+    color: colors.text,
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+  },
+  outForDeliveryBadge: {
+    backgroundColor: '#E8F5E9', // Light green
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: borderRadius.sm,
+  },
+  outForDeliveryText: {
+    fontSize: 10,
+    color: colors.success,
+    fontWeight: 'bold',
+  },
+  piecesText: {
+    fontSize: typography.fontSize.sm,
+    color: colors.textLight,
+    marginBottom: spacing.lg,
+  },
+  destinationsContainer: {
+    marginBottom: spacing.xl,
+  },
+  destinationsTitle: {
+    fontSize: typography.fontSize.base,
+    fontWeight: typography.fontWeight.bold,
+    color: '#4A148C',
+    marginBottom: spacing.md,
+    paddingHorizontal: spacing.xs,
+  },
+  destinationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8F4FF', // Very light purple
+    padding: spacing.md,
+    borderRadius: borderRadius.lg, // More rounded
+    marginBottom: spacing.sm,
+    borderWidth: 1,
+    borderColor: '#F3E5F5',
+  },
+  destNumberContainer: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#AB47BC', // Vibrant purple
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: spacing.md,
+  },
+  destNumber: {
+    color: '#FFF',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  destInfo: {
+    flex: 1,
+  },
+  destName: {
+    fontSize: typography.fontSize.base,
+    fontWeight: 'bold',
+    color: '#212121',
+    marginBottom: 2,
+  },
+  destLocation: {
+    fontSize: typography.fontSize.sm,
+    color: '#757575',
+    marginBottom: 2,
+  },
+  destTracking: {
+    fontSize: 12,
+    color: '#AB47BC', // Purple text for tracking
+    fontWeight: '600',
+  },
+  flowContainer: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.xl,
+    borderWidth: 1,
+    borderColor: '#F5F5F5',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  flowTitle: {
+    fontSize: typography.fontSize.base,
+    fontWeight: 'bold',
+    color: colors.text,
+    marginBottom: spacing.lg,
+  },
+  flowStep: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  flowText: {
+    fontSize: typography.fontSize.sm,
+    color: colors.text,
+    fontWeight: '500',
+    flex: 1,
+  },
+  flowConnector: {
+    paddingLeft: 9, // Align with icon center (20px icon / 2 approx)
+    height: 30, // vertical space
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  dottedLine: {
+    width: 2,
+    height: '100%',
+    borderLeftWidth: 2,
+    borderLeftColor: '#E0E0E0',
+    borderStyle: 'dotted',
+    marginRight: spacing.md,
+  },
+  flowConnectorText: {
+    fontSize: 10, 
+    color: colors.textLight, 
+    fontStyle: 'italic',
+  },
+  infoBox: {
+    backgroundColor: '#F3E5F5', // Purple tint
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.xl,
+  },
+  infoTitle: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: 'bold',
+    color: '#4A148C',
+    marginBottom: spacing.md,
+  },
+  infoText: {
+    fontSize: typography.fontSize.sm,
+    color: '#6A1B9A',
+    marginBottom: 4,
+    lineHeight: 20,
+  },
+  bulkTrackButton: {
+    backgroundColor: '#6200EA', // Deep intuitive purple
+    borderRadius: 30, // Pill shape
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.xl,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: spacing.sm,
+    shadowColor: '#6200EA',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  bulkTrackButtonText: {
+    color: '#FFF',
+    fontSize: typography.fontSize.lg,
+    fontWeight: 'bold',
+  },
+
+  // -- Modal Styles --
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
@@ -646,12 +947,10 @@ const styles = StyleSheet.create({
   },
   modalContent: {
     backgroundColor: colors.background,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
     paddingTop: spacing.md,
-    paddingBottom: spacing.xl,
     paddingHorizontal: spacing.lg,
-    maxHeight: SCREEN_HEIGHT * 0.6,
   },
   modalHandle: {
     width: 40,

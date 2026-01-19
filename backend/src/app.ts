@@ -21,7 +21,7 @@ const httpServer = createServer(app);
 // Initialize Socket.io
 const io = new Server(httpServer, {
   cors: {
-    origin: config.frontendUrl,
+    origin: config.nodeEnv === 'production' ? config.frontendUrl : '*',
     methods: ['GET', 'POST'],
     credentials: true,
   },

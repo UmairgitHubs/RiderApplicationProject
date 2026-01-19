@@ -54,6 +54,8 @@ import MapSelectionScreen from "../screens/common/MapSelectionScreen";
 import DarkModeScreen from "../screens/common/DarkModeScreen";
 import SelectionScreen from "../screens/common/SelectionScreen";
 import FormScreen from "../screens/common/FormScreen";
+import ChatScreen from "../screens/common/ChatScreen";
+import ShipmentTrackingScreen from "../screens/merchant/ShipmentTrackingScreen";
 
 export type RootStackParamList = {
   Splash: undefined;
@@ -69,6 +71,7 @@ export type RootStackParamList = {
   ShipmentDetails:
     | { trackingId?: string; shipmentId?: string; id?: string }
     | undefined;
+  ShipmentTracking: { shipmentId: string } | undefined;
   CreateShipment: { shipmentType?: "franchise" | "individual" } | undefined;
   ShipmentSuccess:
     | { trackingNumber: string; shipmentType: "franchise" | "individual" }
@@ -116,6 +119,7 @@ export type RootStackParamList = {
     buttonText?: string;
   };
   ComingSoon: { featureName?: string; description?: string } | undefined;
+  Chat: { recipientName: string; recipientRole: string; shipmentId?: string } | undefined;
   RiderApp: undefined;
   RoutePlanning: { routeType?: "urgent" | "nextDay" } | undefined;
 };
@@ -247,6 +251,8 @@ export default function AppNavigator() {
         <Stack.Screen name="Form" component={FormScreen} />
         <Stack.Screen name="ComingSoon" component={ComingSoonScreen} />
         <Stack.Screen name="RiderApp" component={RiderNavigator} />
+        <Stack.Screen name="Chat" component={ChatScreen} />
+        <Stack.Screen name="ShipmentTracking" component={ShipmentTrackingScreen} />
         <Stack.Screen name="RoutePlanning" component={RoutePlanningScreen} />
       </Stack.Navigator>
     </NavigationContainer>

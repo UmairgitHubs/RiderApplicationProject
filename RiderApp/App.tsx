@@ -7,16 +7,22 @@ import { LanguageProvider } from './src/contexts/LanguageContext';
 import { ThemeProvider } from './src/contexts/ThemeContext';
 import './src/i18n/config'; // Initialize i18n
 
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+
+const queryClient = new QueryClient();
+
 export default function App() {
   return (
     <SafeAreaProvider>
       <GestureHandlerRootView style={{ flex: 1 }}>
-        <ThemeProvider>
-          <LanguageProvider>
-            <AppNavigator />
-            <StatusBar style="auto" />
-          </LanguageProvider>
-        </ThemeProvider>
+        <QueryClientProvider client={queryClient}>
+          <ThemeProvider>
+            <LanguageProvider>
+              <AppNavigator />
+              <StatusBar style="auto" />
+            </LanguageProvider>
+          </ThemeProvider>
+        </QueryClientProvider>
       </GestureHandlerRootView>
     </SafeAreaProvider>
   );

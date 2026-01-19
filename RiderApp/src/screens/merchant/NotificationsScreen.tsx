@@ -6,66 +6,60 @@ import {
   ScrollView,
   TouchableOpacity,
   Platform,
+  RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, typography, spacing, borderRadius } from '../../theme';
+import { useNotifications, Notification } from '../../hooks/useNotifications';
 
-interface Notification {
-  id: string;
-  type: 'delivery' | 'payment' | 'offer' | 'pickup';
-  title: string;
-  message: string;
-  time: string;
-  read: boolean;
-  icon: string;
-  iconBg: string;
-}
+// Simple time ago helper
+const formatTimeAgo = (dateString: string) => {
+  const date = new Date(dateString);
+  const now = new Date();
+  const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+
+  let interval = seconds / 31536000;
+  if (interval > 1) return Math.floor(interval) + " years ago";
+  interval = seconds / 2592000;
+  if (interval > 1) return Math.floor(interval) + " months ago";
+  interval = seconds / 86400;
+  if (interval > 1) return Math.floor(interval) + " days ago";
+  interval = seconds / 3600;
+  if (interval > 1) return Math.floor(interval) + " hours ago";
+  interval = seconds / 60;
+  if (interval > 1) return Math.floor(interval) + " minutes ago";
+  return Math.floor(seconds) + " seconds ago";
+};
 
 export default function NotificationsScreen({ navigation }: any) {
-  const notifications: Notification[] = [
-    {
-      id: '1',
-      type: 'delivery',
-      title: 'Package Delivered',
-      message: 'Your package CE2024001234567 has been delivered successfully',
-      time: '2 hours ago',
-      read: false,
-      icon: 'cube',
-      iconBg: '#E3F2FD',
-    },
-    {
-      id: '2',
-      type: 'payment',
-      title: 'Payment Successful',
-      message: '$45.99 has been deducted from your wallet',
-      time: '5 hours ago',
-      read: false,
-      icon: 'wallet',
-      iconBg: '#E8F5E9',
-    },
-    {
-      id: '3',
-      type: 'offer',
-      title: 'Special Offer!',
-      message: 'Get 20% off on your next 5 shipments',
-      time: '1 day ago',
-      read: true,
-      icon: 'pricetag',
-      iconBg: '#FFF3E0',
-    },
-    {
-      id: '4',
-      type: 'pickup',
-      title: 'Shipment Picked Up',
-      message: 'Your package has been picked up by the rider',
-      time: '2 days ago',
-      read: true,
-      icon: 'cube',
-      iconBg: '#E3F2FD',
-    },
-  ];
+  const {
+    notifications,
+    unreadCount,
+    isLoading,
+    isRefetching,
+    refetch,
+    markAsRead,
+    markAllAsRead,
+    isMarkingAllAsRead,
+    getIconForType,
+    getColorForType,
+    getBgColorForType
+  } = useNotifications();
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  const handleNotificationPress = (notification: Notification) => {
+    if (!notification.isRead) {
+      markAsRead(notification.id);
+    }
+    // Navigate based on type if needed
+    // if (notification.type === 'shipment' && notification.referenceId) {
+    //   navigation.navigate('ShipmentDetails', { shipmentId: notification.referenceId });
+    // }
+  };
+
+  const handleMarkAllRead = () => {
+     markAllAsRead();
+  };
 
   return (
     <View style={styles.container}>
@@ -89,55 +83,74 @@ export default function NotificationsScreen({ navigation }: any) {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefetching}
+            onRefresh={refetch}
+            colors={[colors.primary]}
+            tintColor={colors.primary}
+          />
+        }
       >
-        <TouchableOpacity 
-          style={styles.markAllButton}
-          onPress={() => {
-            // TODO: Implement mark all as read functionality
-            console.log('Mark all notifications as read');
-          }}
-        >
-          <Text style={styles.markAllText}>Mark all as read</Text>
-        </TouchableOpacity>
-
-        {/* Notifications List */}
-        {notifications.map((notification) => (
-          <TouchableOpacity
-            key={notification.id}
-            style={[
-              styles.notificationCard,
-              !notification.read && styles.notificationCardUnread,
-            ]}
+        {unreadCount > 0 && (
+          <TouchableOpacity 
+            style={styles.markAllButton}
+            onPress={handleMarkAllRead}
+            disabled={isMarkingAllAsRead}
           >
-            <View 
-              style={[
-                styles.iconContainer,
-                { backgroundColor: notification.iconBg }
-              ]}
-            >
-              <Ionicons 
-                name={notification.icon as any} 
-                size={24} 
-                color={
-                  notification.type === 'delivery' || notification.type === 'pickup' 
-                    ? '#2196F3' 
-                    : notification.type === 'payment' 
-                    ? '#4CAF50' 
-                    : '#FF9800'
-                } 
-              />
-            </View>
-            
-            <View style={styles.notificationContent}>
-              <View style={styles.notificationHeader}>
-                <Text style={styles.notificationTitle}>{notification.title}</Text>
-                {!notification.read && <View style={styles.unreadDot} />}
-              </View>
-              <Text style={styles.notificationMessage}>{notification.message}</Text>
-              <Text style={styles.notificationTime}>{notification.time}</Text>
-            </View>
+             {isMarkingAllAsRead ? (
+               <ActivityIndicator size="small" color={colors.primary} />
+             ) : (
+               <Text style={styles.markAllText}>Mark all as read</Text>
+             )}
           </TouchableOpacity>
-        ))}
+        )}
+
+        {/* Loading State */}
+        {isLoading && !isRefetching ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={colors.primary} />
+          </View>
+        ) : notifications.length === 0 ? (
+           <View style={styles.emptyContainer}>
+             <Ionicons name="notifications-off-outline" size={48} color={colors.textLight} />
+             <Text style={styles.emptyText}>No notifications yet</Text>
+           </View>
+        ) : (
+          /* Notifications List */
+          notifications.map((notification) => (
+            <TouchableOpacity
+              key={notification.id}
+              style={[
+                styles.notificationCard,
+                !notification.isRead && styles.notificationCardUnread,
+              ]}
+              onPress={() => handleNotificationPress(notification)}
+            >
+              <View 
+                style={[
+                  styles.iconContainer,
+                  { backgroundColor: getBgColorForType(notification.type) }
+                ]}
+              >
+                <Ionicons 
+                  name={getIconForType(notification.type) as any} 
+                  size={24} 
+                  color={getColorForType(notification.type)} 
+                />
+              </View>
+              
+              <View style={styles.notificationContent}>
+                <View style={styles.notificationHeader}>
+                  <Text style={styles.notificationTitle}>{notification.title}</Text>
+                  {!notification.isRead && <View style={styles.unreadDot} />}
+                </View>
+                <Text style={styles.notificationMessage}>{notification.message}</Text>
+                <Text style={styles.notificationTime}>{formatTimeAgo(notification.createdAt)}</Text>
+              </View>
+            </TouchableOpacity>
+          ))
+        )}
       </ScrollView>
     </View>
   );
@@ -179,10 +192,12 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: spacing.lg,
+    paddingBottom: 40,
   },
   markAllButton: {
     alignSelf: 'flex-end',
     marginBottom: spacing.md,
+    padding: spacing.xs,
   },
   markAllText: {
     fontSize: typography.fontSize.sm,
@@ -200,9 +215,10 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 2,
     elevation: 2,
+    borderWidth: 1,
+    borderColor: 'transparent',
   },
   notificationCardUnread: {
-    borderWidth: 1,
     borderColor: colors.primary,
     backgroundColor: '#FFF9F5',
   },
@@ -244,5 +260,17 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.xs,
     color: colors.textLight,
   },
+  loadingContainer: {
+    padding: spacing.xl,
+    alignItems: 'center',
+  },
+  emptyContainer: {
+     padding: spacing['2xl'],
+     alignItems: 'center',
+     gap: spacing.md,
+  },
+  emptyText: {
+    fontSize: typography.fontSize.base,
+    color: colors.textLight,
+  }
 });
-

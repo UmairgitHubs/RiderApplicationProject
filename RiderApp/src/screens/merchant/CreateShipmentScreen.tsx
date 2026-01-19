@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, typography, spacing, borderRadius } from '../../theme';
-import { shipmentApi } from '../../services/api';
+import { useCreateShipment } from '../../hooks/useShipments';
 import FranchiseShipmentScreen from './FranchiseShipmentScreen';
 import IndividualShipmentScreen from './IndividualShipmentScreen';
 
@@ -28,6 +28,7 @@ interface Package {
 
 export default function CreateShipmentScreen({ navigation, route }: any) {
   const shipmentType = route?.params?.shipmentType;
+  const { mutateAsync: createShipment, isPending: isCreating } = useCreateShipment();
   
   // If franchise type, render franchise screen
   if (shipmentType === 'franchise') {
@@ -45,7 +46,7 @@ export default function CreateShipmentScreen({ navigation, route }: any) {
   const [pickupAddress, setPickupAddress] = useState('');
   const [deliveryAddress, setDeliveryAddress] = useState('');
   const [specialInstructions, setSpecialInstructions] = useState('');
-  const [loading, setLoading] = useState(false);
+  
   const [packages, setPackages] = useState<Package[]>([
     {
       id: '1',
@@ -56,6 +57,7 @@ export default function CreateShipmentScreen({ navigation, route }: any) {
       description: '',
     },
   ]);
+
 
   const addPackage = () => {
     setPackages([
@@ -97,8 +99,6 @@ export default function CreateShipmentScreen({ navigation, route }: any) {
       return;
     }
 
-    setLoading(true);
-
     try {
       const shipmentData = {
         recipientName,
@@ -117,38 +117,27 @@ export default function CreateShipmentScreen({ navigation, route }: any) {
 
       console.log('Creating shipment with data:', JSON.stringify(shipmentData, null, 2));
 
-      const response = await shipmentApi.create(shipmentData);
+      await createShipment(shipmentData);
 
-      if (response.success) {
-        Alert.alert(
-          'Success',
-          `Shipment created successfully with ${packages.length} package(s)!`,
-          [
-            {
-              text: 'OK',
-              onPress: () => {
-                navigation.goBack();
-                // Refresh shipments list if needed
-                const parent = navigation.getParent();
-                if (parent) {
-                  // Trigger refresh in parent navigator if available
-                  parent.navigate('MerchantApp', { screen: 'Home' });
-                }
-              },
+      Alert.alert(
+        'Success',
+        `Shipment created successfully with ${packages.length} package(s)!`,
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              navigation.goBack();
+              // Refresh shipments list handled by query invalidation
             },
-          ]
-        );
-      } else {
-        Alert.alert('Error', response.error?.message || 'Failed to create shipment');
-      }
+          },
+        ]
+      );
     } catch (error: any) {
       console.error('Error creating shipment:', error);
       Alert.alert(
         'Error',
         error.message || 'Failed to create shipment. Please check your connection and try again.'
       );
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -478,17 +467,17 @@ export default function CreateShipmentScreen({ navigation, route }: any) {
 
         {/* Create Shipment Button */}
         <TouchableOpacity 
-          style={[styles.createButton, loading && styles.createButtonDisabled]}
+          style={[styles.createButton, isCreating && styles.createButtonDisabled]}
           onPress={handleCreateShipment}
-          disabled={loading}
+          disabled={isCreating}
         >
-          {loading ? (
+          {isCreating ? (
             <ActivityIndicator size="small" color={colors.textWhite} />
           ) : (
             <Ionicons name="checkmark-circle" size={24} color={colors.textWhite} />
           )}
           <Text style={styles.createButtonText}>
-            {loading ? 'Creating...' : 'Create Shipment'}
+            {isCreating ? 'Creating...' : 'Create Shipment'}
           </Text>
         </TouchableOpacity>
       </ScrollView>

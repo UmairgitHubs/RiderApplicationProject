@@ -19,6 +19,7 @@ import adminCMSRoutes from './admin.cms.routes';
 import adminSupportRoutes from './admin.support.routes';
 import adminRouteRoutes from './admin.route.routes';
 import supportRoutes from './support.routes';
+import chatRoutes from './chat.routes';
 import { maintenanceMiddleware } from '../middleware/maintenance.middleware';
 
 const router = Router();
@@ -31,6 +32,7 @@ router.use('/wallet', walletRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/profile', profileRoutes);
 router.use('/support', supportRoutes);
+router.use('/chat', chatRoutes);
 
 // More specific admin routes FIRST
 router.use('/admin/analytics', analyticsRoutes);
