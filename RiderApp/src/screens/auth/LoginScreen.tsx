@@ -59,20 +59,32 @@ export default function LoginScreen({ navigation, route }: any) {
         password
       );
 
-      if (response.success && response.data?.token) {
-        // Navigate based on user role
-        const userRole = response.data.user?.role;
-        if (userRole === "merchant") {
-          navigation.replace("MerchantApp");
-        } else if (userRole === "rider") {
-          navigation.replace("RiderApp");
-        } else {
-          Alert.alert("Error", "Unknown user role. Please contact support.");
+      if (response.success) {
+        if (response.data?.requiresTwoFactor) {
+          // Navigate to OTP screen for 2FA
+          navigation.navigate('VerifyOTP', { 
+            email: email.trim().toLowerCase(),
+            isLogin: true 
+          });
+          return;
+        }
+
+        if (response.data?.token) {
+          // Navigate based on user role
+          const userRole = response.data.user?.role?.toLowerCase();
+          
+          if (userRole === "merchant") {
+            navigation.replace("MerchantApp");
+          } else if (userRole === "rider") {
+            navigation.replace("RiderApp");
+          } else {
+            Alert.alert("Error", `Unknown user role: ${userRole}. Please contact support.`);
+          }
         }
       } else {
         Alert.alert(
           "Login Failed",
-          response.error?.message ||
+            response.error?.message ||
             "Invalid email or password. Please try again."
         );
       }

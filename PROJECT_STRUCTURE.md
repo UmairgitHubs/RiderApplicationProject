@@ -31,6 +31,7 @@ The codebase is divided into two primary logical units:
 
 - **Tech Stack**: React Native, Expo, TypeScript.
 - **Entry Point**: `App.tsx`
+- **Detailed Index**: [MOBILE_INDEX.md](./RiderApp/MOBILE_INDEX.md)
 
 **Source Structure (`src/`)**:
 
@@ -42,7 +43,7 @@ Contains the UI views for the application, organized by user role:
 - **`auth/`**: Authentication Screens (Login, Register, OTP).
 - **`merchant/`**: Merchant functionality (Shipment creation, Dashboard, Wallet).
 - **`rider/`**: Rider functionality (Order acceptance, delivery tracking, Map).
-- **`common/`**: Shared screens (Settings, Profile, Support).
+- **`common/`**: Shared screens (Settings, Profile, Support, Chat).
 
 ### **Components (`src/components/`)**
 Reusable UI blocks shared across screens.
@@ -71,4 +72,4 @@ React Context providers for global state management (e.g., AuthContext).
 - **Assets**: Shared assets (images/fonts) are primarily located in `RiderApp/assets`.
 
 ---
-*Last Updated: 2026-01-10*
+*Last Updated: 2026-01-19*

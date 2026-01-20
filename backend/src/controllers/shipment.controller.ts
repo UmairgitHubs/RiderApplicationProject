@@ -4,6 +4,7 @@ import { logger } from '../utils/logger';
 import QRCode from 'qrcode';
 import { v4 as uuidv4 } from 'uuid';
 import { settingsService } from '../services/settings.service';
+import { sendOrderUpdateNotification, sendDeliveryAlertNotification } from '../services/notification.service';
 
 const generateTrackingNumber = (): string => {
   const prefix = 'CE';
@@ -569,6 +570,31 @@ export const updateShipmentStatus = async (req: Request, res: Response) => {
     }
 
     await prisma.notification.createMany({ data: notifications });
+
+    // Send smart notifications based on user preferences (non-blocking)
+    const statusDisplayNames: Record<string, string> = {
+      assigned: 'Assigned to Rider',
+      picked_up: 'Picked Up',
+      in_transit: 'In Transit',
+      delivered: 'Delivered',
+      cancelled: 'Cancelled',
+    };
+
+    // Send notification to merchant
+    sendOrderUpdateNotification(
+      shipment.merchant_id,
+      shipment.tracking_number,
+      statusDisplayNames[status] || status
+    ).catch((error) => logger.error('Error sending merchant notification:', error));
+
+    // Send notification to rider if assigned
+    if (shipment.rider_id) {
+      sendDeliveryAlertNotification(
+        shipment.rider_id,
+        shipment.tracking_number,
+        `Shipment status updated to ${statusDisplayNames[status] || status}`
+      ).catch((error) => logger.error('Error sending rider notification:', error));
+    }
 
     res.json({
       success: true,

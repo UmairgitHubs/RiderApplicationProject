@@ -1,35 +1,33 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   TextInput,
   TouchableOpacity,
   Platform,
   KeyboardAvoidingView,
-  Dimensions,
-  Keyboard,
   ActivityIndicator,
   Alert,
+  Linking,
+  FlatList,
+  useWindowDimensions,
+  ScrollView,
+  Keyboard,
 } from 'react-native';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { colors, spacing, borderRadius } from '../../theme';
+import { colors } from '../../theme';
 import { chatApi } from '../../services/api';
 import { socketService } from '../../services/socket';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-
 /**
- * ChatScreen - Production Ready & Secure
- * Senior Developer Implementation:
- * - Dynamic backend synchronization.
- * - Socket.io real-time message bubbling.
- * - Secure participant validation.
- * - Flush keyboard handling.
+ * ChatScreen - Production Grade with Perfect Keyboard Handling
+ * - Fully responsive across all devices
+ * - Bulletproof keyboard behavior
+ * - No white space issues
  */
 
 interface Message {
@@ -44,23 +42,60 @@ export default function ChatScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const insets = useSafeAreaInsets();
-  const scrollViewRef = useRef<ScrollView>(null);
+  const { width: windowWidth } = useWindowDimensions();
+  const flatListRef = useRef<FlatList>(null);
   
-  const { recipientName, recipientRole, shipmentId } = route.params || {};
+  const { recipientName, recipientRole, shipmentId, recipientId, recipientPhone } = route.params || {};
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [loading, setLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [isKeyboardVisible, setKeyboardVisible] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  // Responsive breakpoints
+  const isSmallPhone = windowWidth < 360;
+  const isPhone = windowWidth < 768;
+  const isTablet = windowWidth >= 768 && windowWidth < 1024;
+  const isLargeTablet = windowWidth >= 1024;
+  
+  const getContentWidth = () => {
+    if (isLargeTablet) return 700;
+    if (isTablet) return 600;
+    return windowWidth;
+  };
+  
+  const contentWidth = getContentWidth();
+  const horizontalPadding = isPhone ? 16 : 24;
+  const bubbleMaxWidth = isSmallPhone ? '90%' : '85%';
 
   const quickReplies = ['On my way', 'Arrived', '5 min away', 'Call me'];
+
+  // Keyboard listeners
+  useEffect(() => {
+    const showSubscription = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      (e) => {
+        setKeyboardHeight(e.endCoordinates.height);
+      }
+    );
+    const hideSubscription = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => {
+        setKeyboardHeight(0);
+      }
+    );
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
 
   // Initialize Data
   useEffect(() => {
     const init = async () => {
       try {
-        // 1. Get Current User and Fetch Messages
         const userData = await AsyncStorage.getItem('@user_data');
         let userId = currentUserId;
         
@@ -76,11 +111,11 @@ export default function ChatScreen() {
             const formatted: Message[] = response.data.map((m: any) => ({
               id: m.id,
               text: m.content,
-              sender: m.sender_id === userId ? 'me' : 'other',
+              sender: (m.sender_id === userId || m.senderId === userId) ? 'me' : 'other',
               time: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
               createdAt: m.created_at
             }));
-            setMessages(formatted);
+            setMessages(formatted.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
           }
           await chatApi.markShipmentRead(shipmentId);
         }
@@ -88,11 +123,10 @@ export default function ChatScreen() {
         console.error('Chat Init Error:', err);
       } finally {
         setLoading(false);
-        setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: false }), 200);
       }
     };
     init();
-  }, [shipmentId, currentUserId]);
+  }, [shipmentId]);
 
   // Socket setup
   useEffect(() => {
@@ -100,71 +134,114 @@ export default function ChatScreen() {
     const setupSocket = async () => {
       socket = await socketService.connect();
       if (socket) {
+        socket.emit('join_order', { orderId: shipmentId });
+
         socket.on('chat:new-message', (data: any) => {
-          if (data.shipmentId === shipmentId) {
+          if (data.orderId === shipmentId || data.shipmentId === shipmentId) {
             const m = data.message;
-            const newMessage: Message = {
-              id: m.id,
-              text: m.content,
-              sender: m.sender_id === currentUserId ? 'me' : 'other',
-              time: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-              createdAt: m.created_at
-            };
-            setMessages(prev => [...prev, newMessage]);
-            setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
+            setMessages(prev => {
+              if (prev.some(msg => msg.id === m.id)) return prev;
+              
+              const newMessage: Message = {
+                id: m.id,
+                text: m.content || m.text,
+                sender: (m.sender_id === currentUserId || m.senderId === currentUserId) ? 'me' : 'other',
+                time: new Date(m.created_at || m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                createdAt: m.created_at || m.createdAt
+              };
+              return [newMessage, ...prev];
+            });
           }
         });
       }
     };
 
-    setupSocket();
-    return () => {
-      if (socket) socket.off('chat:new-message');
-    };
-  }, [shipmentId]);
+    if (shipmentId && currentUserId) {
+      setupSocket();
+    }
 
-  // Keyboard Management
-  useEffect(() => {
-    const showSub = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow', () => {
-      setKeyboardVisible(true);
-      setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
-    });
-    const hideSub = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide', () => setKeyboardVisible(false));
     return () => {
-      showSub.remove();
-      hideSub.remove();
+      if (socket) {
+        socket.off('chat:new-message');
+      }
     };
-  }, []);
+  }, [shipmentId, currentUserId]);
 
   const handleSend = async (text: string = inputText) => {
     const trimmedText = text.trim();
     if (!trimmedText || !shipmentId) return;
 
-    // Optimistic Update
-    const tempId = Date.now().toString();
-    const newMessage: Message = {
-      id: tempId,
-      text: trimmedText,
-      sender: 'me',
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      createdAt: new Date().toISOString()
-    };
+    const socket = socketService.getSocket();
+    
+    if (socket && socket.connected) {
+      const tempId = `temp-${Date.now()}`;
+      const newMessage: Message = {
+        id: tempId,
+        text: trimmedText,
+        sender: 'me',
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        createdAt: new Date().toISOString()
+      };
 
-    setMessages(prev => [...prev, newMessage]);
-    setInputText('');
-    setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
+      setMessages(prev => [newMessage, ...prev]);
+      setInputText('');
 
-    try {
-      await chatApi.sendShipmentMessage({
-        shipmentId,
-        content: trimmedText
-      });
-    } catch (err) {
-      Alert.alert('Error', 'Failed to send message');
-      // Rollback optimistic update
-      setMessages(prev => prev.filter(m => m.id !== tempId));
+      try {
+        socket.emit('send_message', {
+          orderId: shipmentId,
+          content: trimmedText,
+          recipientId: recipientId
+        });
+      } catch (err) {
+        console.error('Send message error:', err);
+      }
+    } else {
+      try {
+        await chatApi.sendShipmentMessage({ shipmentId, content: trimmedText });
+        setInputText('');
+      } catch (err) {
+        Alert.alert('Error', 'Failed to send message');
+      }
     }
   };
+
+  const handleCall = () => {
+    const phone = recipientPhone || route.params?.phone || route.params?.riderPhone;
+    if (phone) {
+      Linking.openURL(`tel:${phone}`);
+    } else {
+      Alert.alert('Not Available', 'Contact number is not available for this user.');
+    }
+  };
+
+  const renderItem = ({ item }: { item: Message }) => (
+    <View style={[styles.messageWrapper, { width: isPhone ? windowWidth : contentWidth, alignSelf: 'center' }]}>
+      <View style={[
+        styles.messageRow, 
+        { maxWidth: bubbleMaxWidth },
+        item.sender === 'me' ? styles.messageRowMe : styles.messageRowOther
+      ]}>
+        <View style={[
+          styles.bubble, 
+          item.sender === 'me' ? styles.bubbleMe : styles.bubbleOther
+        ]}>
+          <Text style={[
+            styles.messageText, 
+            { fontSize: isSmallPhone ? 14 : 15 },
+            item.sender === 'me' ? styles.messageTextMe : styles.messageTextOther
+          ]}>
+            {item.text}
+          </Text>
+          <Text style={[
+            styles.timeText, 
+            item.sender === 'me' ? styles.timeTextMe : styles.timeTextOther
+          ]}>
+            {item.time}
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
 
   if (loading) {
     return (
@@ -176,111 +253,106 @@ export default function ChatScreen() {
 
   return (
     <View style={styles.container}>
-      <KeyboardAvoidingView 
-        style={styles.flex1} 
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
-        {/* Header */}
-        <View style={[styles.header, { paddingTop: insets.top + (Platform.OS === 'ios' ? 0 : 10) }]}>
+      {/* Header */}
+      <View style={[styles.header, { paddingTop: Math.max(insets.top, isSmallPhone ? 12 : 16) }]}>
+        <View style={[styles.headerContent, { paddingHorizontal: horizontalPadding }]}>
           <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
-            <Ionicons name="arrow-back" size={24} color="#333" />
+            <Ionicons name="arrow-back" size={24} color="#1A1A1A" />
           </TouchableOpacity>
+          
           <View style={styles.headerInfo}>
-            <View style={styles.avatarSmall}>
-              <Text style={styles.avatarTextSmall}>{recipientName?.charAt(0) || 'A'}</Text>
+            <View style={[styles.avatar, { width: isSmallPhone ? 36 : 40, height: isSmallPhone ? 36 : 40 }]}>
+              <Text style={[styles.avatarText, { fontSize: isSmallPhone ? 16 : 18 }]}>
+                {recipientName?.charAt(0) || 'A'}
+              </Text>
+              <View style={styles.statusDot} />
             </View>
-            <View>
-              <Text style={styles.headerTitle}>{recipientName}</Text>
-              <View style={styles.statusRow}>
-                <View style={styles.onlineDot} />
-                <Text style={styles.statusText}>{recipientRole}</Text>
-              </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.headerName, { fontSize: isSmallPhone ? 15 : 16 }]} numberOfLines={1}>
+                {recipientName}
+              </Text>
+              <Text style={[styles.headerRole, { fontSize: isSmallPhone ? 11 : 12 }]}>
+                {recipientRole}
+              </Text>
             </View>
           </View>
-          <TouchableOpacity style={styles.callBtn}>
-            <Ionicons name="call-outline" size={22} color={colors.primary} />
+
+          <TouchableOpacity style={styles.callBtn} onPress={handleCall}>
+            <View style={[styles.callIconBox, { width: isSmallPhone ? 36 : 40, height: isSmallPhone ? 36 : 40 }]}>
+              <Ionicons name="call" size={isSmallPhone ? 18 : 20} color={colors.primary} />
+            </View>
           </TouchableOpacity>
         </View>
+      </View>
 
-        {/* Messages List */}
-        <ScrollView 
-          ref={scrollViewRef}
-          style={styles.messagesList}
-          contentContainerStyle={styles.messagesContent}
+      {/* Content with KeyboardAvoidingView */}
+      <KeyboardAvoidingView 
+        style={styles.flex1}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={0}
+      >
+        {/* Message List */}
+        <FlatList
+          ref={flatListRef}
+          data={messages}
+          renderItem={renderItem}
+          keyExtractor={(item) => item.id}
+          inverted
+          contentContainerStyle={[styles.messagesPadding, { paddingHorizontal: isPhone ? 16 : 0 }]}
           showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.dateBadge}>
-            <Text style={styles.dateText}>Today</Text>
-          </View>
-
-          {messages.map((item) => (
-            <View 
-              key={item.id} 
-              style={[
-                styles.messageRow, 
-                item.sender === 'me' ? styles.messageRowMe : styles.messageRowOther
-              ]}
-            >
-              <View style={[
-                styles.bubble, 
-                item.sender === 'me' ? styles.bubbleMe : styles.bubbleOther
-              ]}>
-                <Text style={[
-                  styles.messageText, 
-                  item.sender === 'me' ? styles.messageTextMe : styles.messageTextOther
-                ]}>
-                  {item.text}
-                </Text>
-                <Text style={[
-                  styles.timeText, 
-                  item.sender === 'me' ? styles.timeTextMe : styles.timeTextOther
-                ]}>
-                  {item.time}
-                </Text>
-              </View>
-            </View>
-          ))}
-        </ScrollView>
+          style={styles.flex1}
+        />
 
         {/* Footer */}
-        <View style={[
-          styles.footer, 
-          { paddingBottom: isKeyboardVisible ? 10 : Math.max(insets.bottom, 10) }
-        ]}>
-          {!isKeyboardVisible && messages.length < 10 && (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.quickReplyScroll}>
-              {quickReplies.map((reply, idx) => (
+        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+          {/* Quick Replies */}
+          {(messages.length < 5 || !isSmallPhone) && keyboardHeight === 0 && (
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={[styles.quickReplyList, { paddingHorizontal: horizontalPadding }]}
+              style={styles.quickReplyContainer}
+            >
+              {quickReplies.map((item, idx) => (
                 <TouchableOpacity 
-                  key={idx} 
-                  style={styles.quickReplyChip}
-                  onPress={() => handleSend(reply)}
+                  key={idx}
+                  style={[styles.quickReplyChip, { paddingHorizontal: isSmallPhone ? 12 : 16 }]}
+                  onPress={() => handleSend(item)}
                 >
-                  <Text style={styles.quickReplyText}>{reply}</Text>
+                  <Text style={[styles.quickReplyText, { fontSize: isSmallPhone ? 12 : 13 }]}>
+                    {item}
+                  </Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
           )}
-          
-          <View style={styles.inputRow}>
-            <TouchableOpacity style={styles.attachBtn}>
-              <Ionicons name="add-circle-outline" size={28} color="#9E9E9E" />
+
+          <View style={[styles.inputArea, { paddingHorizontal: isSmallPhone ? 8 : 12 }]}>
+            <TouchableOpacity style={[styles.actionBtn, { width: isSmallPhone ? 36 : 40, height: isSmallPhone ? 36 : 40 }]}>
+              <Ionicons name="add" size={isSmallPhone ? 24 : 28} color="#999" />
             </TouchableOpacity>
-            <View style={styles.inputContainer}>
+            
+            <View style={[styles.inputWrapper, { marginHorizontal: isSmallPhone ? 6 : 8 }]}>
               <TextInput
-                style={styles.input}
+                style={[styles.input, { fontSize: isSmallPhone ? 14 : 15 }]}
                 placeholder="Type a message..."
-                placeholderTextColor="#9E9E9E"
+                placeholderTextColor="#999"
                 value={inputText}
                 onChangeText={setInputText}
                 multiline
               />
             </View>
+
             <TouchableOpacity 
-              style={[styles.sendBtn, !inputText.trim() && styles.sendBtnDisabled]}
+              style={[
+                styles.sendBtn, 
+                { width: isSmallPhone ? 40 : 44, height: isSmallPhone ? 40 : 44 },
+                !inputText.trim() && styles.sendBtnDisabled
+              ]}
               onPress={() => handleSend()}
               disabled={!inputText.trim()}
             >
-              <Ionicons name="send" size={20} color="#FFF" />
+              <Ionicons name="send" size={isSmallPhone ? 16 : 18} color="#FFF" />
             </TouchableOpacity>
           </View>
         </View>
@@ -290,55 +362,199 @@ export default function ChatScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F9FAFC' },
-  flex1: { flex: 1 },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  header: {
-    flexDirection: 'row',
+  container: {
+    flex: 1,
+    backgroundColor: '#F8F9FB',
+  },
+  flex1: {
+    flex: 1,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingBottom: 15,
+  },
+  header: {
     backgroundColor: '#FFF',
     borderBottomWidth: 1,
     borderBottomColor: '#F0F0F0',
     elevation: 2,
     shadowColor: '#000',
     shadowOpacity: 0.05,
-    shadowRadius: 5,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 2 },
   },
-  backBtn: { padding: 5, marginRight: 10 },
-  headerInfo: { flex: 1, flexDirection: 'row', alignItems: 'center' },
-  avatarSmall: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primary, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
-  avatarTextSmall: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
-  headerTitle: { fontSize: 16, fontWeight: '700', color: '#333' },
-  statusRow: { flexDirection: 'row', alignItems: 'center' },
-  onlineDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#4CAF50', marginRight: 5 },
-  statusText: { fontSize: 12, color: '#9E9E9E' },
-  callBtn: { padding: 8 },
-  messagesList: { flex: 1 },
-  messagesContent: { padding: 16, paddingBottom: 20 },
-  dateBadge: { alignSelf: 'center', backgroundColor: '#E0E0E0', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12, marginBottom: 20 },
-  dateText: { fontSize: 11, color: '#757575', fontWeight: '600' },
-  messageRow: { marginBottom: 16, maxWidth: '85%' },
-  messageRowMe: { alignSelf: 'flex-end' },
-  messageRowOther: { alignSelf: 'flex-start' },
-  bubble: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 20 },
-  bubbleMe: { backgroundColor: colors.primary, borderBottomRightRadius: 4 },
-  bubbleOther: { backgroundColor: '#FFF', borderWidth: 1, borderColor: '#F0F0F0', borderBottomLeftRadius: 4 },
-  messageText: { fontSize: 15, lineHeight: 20 },
-  messageTextMe: { color: '#FFF' },
-  messageTextOther: { color: '#333' },
-  timeText: { fontSize: 10, marginTop: 4, alignSelf: 'flex-end' },
-  timeTextMe: { color: 'rgba(255,255,255,0.7)' },
-  timeTextOther: { color: '#9E9E9E' },
-  footer: { backgroundColor: '#FFF', borderTopWidth: 1, borderTopColor: '#F0F0F0' },
-  quickReplyScroll: { paddingHorizontal: 16, marginVertical: 10 },
-  quickReplyChip: { backgroundColor: '#F0F2F5', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, marginRight: 8 },
-  quickReplyText: { fontSize: 13, color: '#555', fontWeight: '500' },
-  inputRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 8 },
-  attachBtn: { padding: 5 },
-  inputContainer: { flex: 1, backgroundColor: '#F0F2F5', borderRadius: 24, marginHorizontal: 8, paddingHorizontal: 16, paddingVertical: Platform.OS === 'ios' ? 10 : 2, maxHeight: 100 },
-  input: { fontSize: 15, color: '#333' },
-  sendBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.primary, justifyContent: 'center', alignItems: 'center' },
-  sendBtnDisabled: { backgroundColor: '#E0E0E0' },
+  headerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingBottom: 12,
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  headerInfo: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 4,
+  },
+  avatar: {
+    borderRadius: 20,
+    backgroundColor: '#F37022',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  avatarText: {
+    color: '#FFF',
+    fontWeight: 'bold',
+  },
+  statusDot: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#4CAF50',
+    borderWidth: 2,
+    borderColor: '#FFF',
+  },
+  headerName: {
+    fontWeight: '700',
+    color: '#1A1A1A',
+  },
+  headerRole: {
+    color: '#999',
+    marginTop: 1,
+  },
+  callBtn: {
+    marginLeft: 10,
+  },
+  callIconBox: {
+    borderRadius: 20,
+    backgroundColor: '#FFF9F5',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#FFE0CC',
+  },
+  messagesPadding: {
+    paddingTop: 10,
+    paddingBottom: 20,
+  },
+  messageWrapper: {
+    marginVertical: 4,
+  },
+  messageRow: {
+    flexDirection: 'row',
+  },
+  messageRowMe: {
+    alignSelf: 'flex-end',
+  },
+  messageRowOther: {
+    alignSelf: 'flex-start',
+  },
+  bubble: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOpacity: 0.03,
+    shadowRadius: 5,
+    elevation: 1,
+  },
+  bubbleMe: {
+    backgroundColor: colors.primary,
+    borderBottomRightRadius: 4,
+  },
+  bubbleOther: {
+    backgroundColor: '#FFF',
+    borderBottomLeftRadius: 4,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
+  },
+  messageText: {
+    lineHeight: 22,
+  },
+  messageTextMe: {
+    color: '#FFF',
+  },
+  messageTextOther: {
+    color: '#1A1A1A',
+  },
+  timeText: {
+    fontSize: 10,
+    marginTop: 4,
+    alignSelf: 'flex-end',
+  },
+  timeTextMe: {
+    color: 'rgba(255,255,255,0.7)',
+  },
+  timeTextOther: {
+    color: '#999',
+  },
+  footer: {
+    backgroundColor: '#FFF',
+    borderTopWidth: 1,
+    borderTopColor: '#F0F0F0',
+  },
+  quickReplyContainer: {
+    maxHeight: 60,
+  },
+  quickReplyList: {
+    paddingVertical: 10,
+  },
+  quickReplyChip: {
+    backgroundColor: '#F5F7FA',
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginRight: 8,
+    borderWidth: 1,
+    borderColor: '#EDF1F7',
+  },
+  quickReplyText: {
+    color: '#455A64',
+    fontWeight: '600',
+  },
+  inputArea: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  actionBtn: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  inputWrapper: {
+    flex: 1,
+    backgroundColor: '#F5F7FA',
+    borderRadius: 24,
+    paddingHorizontal: 16,
+    paddingVertical: Platform.OS === 'ios' ? 10 : 8,
+    maxHeight: 100,
+  },
+  input: {
+    color: '#1A1A1A',
+  },
+  sendBtn: {
+    borderRadius: 22,
+    backgroundColor: colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 2,
+    shadowColor: colors.primary,
+    shadowOpacity: 0.2,
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  sendBtnDisabled: {
+    backgroundColor: '#E0E0E0',
+    shadowOpacity: 0,
+    elevation: 0,
+  },
 });

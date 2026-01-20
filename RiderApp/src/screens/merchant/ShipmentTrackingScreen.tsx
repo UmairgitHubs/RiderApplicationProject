@@ -16,7 +16,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, spacing, borderRadius } from '../../theme';
-import { shipmentApi } from '../../services/api';
+import { api, shipmentApi } from '../../services/api';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -226,6 +226,8 @@ export default function ShipmentTrackingScreen() {
             onPress={() => navigation.navigate('Chat', { 
               recipientName: shipment.rider?.full_name || 'Support', 
               recipientRole: shipment.rider ? 'Rider' : 'Support',
+              recipientId: shipment.rider?.id,
+              recipientPhone: shipment.rider?.phone,
               shipmentId: shipment.id
             })}
           >
@@ -238,15 +240,20 @@ export default function ShipmentTrackingScreen() {
           <TouchableOpacity 
             style={styles.actionBox}
             onPress={() => {
-              const phone = shipment.rider?.phone || shipment.merchant?.phone;
-              if (phone) Linking.openURL(`tel:${phone}`);
-              else Alert.alert('Sorry', 'Contact number not available');
+              const phone = shipment.rider?.phone;
+              if (phone) {
+                Linking.openURL(`tel:${phone}`);
+              } else if (!shipment.rider) {
+                Alert.alert('Not Assigned', 'No rider has been assigned to this shipment yet.');
+              } else {
+                Alert.alert('Not Available', 'Rider contact number is not available.');
+              }
             }}
           >
             <View style={[styles.actionIconCircle, { backgroundColor: '#FFF3E0' }]}>
               <Ionicons name="call" size={22} color={ORANGE} />
             </View>
-            <Text style={styles.actionLabel}>Call</Text>
+            <Text style={styles.actionLabel}>Call Rider</Text>
           </TouchableOpacity>
         </View>
 

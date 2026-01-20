@@ -35,6 +35,7 @@ import PrivacyPolicyScreen from "../screens/merchant/PrivacyPolicyScreen";
 import PrivacySecurityScreen from "../screens/merchant/PrivacySecurityScreen";
 import ManageAddressesScreen from "../screens/merchant/ManageAddressesScreen";
 import AddAddressScreen from "../screens/merchant/AddAddressScreen";
+import EditAddressScreen from "../screens/merchant/EditAddressScreen";
 import PaymentMethodsScreen from "../screens/merchant/PaymentMethodsScreen";
 import RiderDashboard from "../screens/rider/RiderDashboard";
 import AvailableOrdersScreen from "../screens/rider/AvailableOrdersScreen";
@@ -46,7 +47,7 @@ import PerformanceStatsScreen from "../screens/rider/PerformanceStatsScreen";
 import RouteScreen from "../screens/rider/RouteScreen";
 import RoutePlanningScreen from "../screens/rider/RoutePlanningScreen";
 import AboutScreen from "../screens/common/AboutScreen";
-import NotificationSettingsScreen from "../screens/common/NotificationSettingsScreen";
+import NotificationSettingsScreen from '../screens/common/NotificationSettingsScreen';
 import ComingSoonScreen from "../screens/common/ComingSoonScreen";
 import LanguageSettingsScreen from "../screens/common/LanguageSettingsScreen";
 import ChatSupportScreen from "../screens/common/ChatSupportScreen";
@@ -85,6 +86,7 @@ export type RootStackParamList = {
   PrivacySecurity: undefined;
   ManageAddresses: undefined;
   AddAddress: undefined;
+  EditAddress: { address: any } | undefined;
   PaymentMethods: undefined;
   AvailableOrders: undefined;
   RiderOrderDetails: { orderId: string } | undefined;
@@ -141,7 +143,7 @@ export default function AppNavigator() {
       const authenticated = await authApi.isAuthenticated();
       if (authenticated) {
         const user = await authApi.getStoredUser();
-        setUserRole(user?.role || null);
+        setUserRole(user?.role?.toLowerCase() || null);
       }
       setIsAuthenticated(authenticated);
 
@@ -218,6 +220,7 @@ export default function AppNavigator() {
           component={ManageAddressesScreen}
         />
         <Stack.Screen name="AddAddress" component={AddAddressScreen} />
+        <Stack.Screen name="EditAddress" component={EditAddressScreen} />
         <Stack.Screen name="PaymentMethods" component={PaymentMethodsScreen} />
         <Stack.Screen
           name="AvailableOrders"

@@ -2,6 +2,7 @@ import { Response } from 'express';
 import prisma from '../config/database';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { asyncHandler } from '../middleware/async.middleware';
+import { sendSystemUpdateNotification, sendPromotionNotification, NotificationService } from '../services/notification.service';
 
 // Get all CMS items
 export const getAllCMS = asyncHandler(async (req: AuthRequest, res: Response) => {
@@ -72,6 +73,41 @@ export const createCMS = asyncHandler(async (req: AuthRequest, res: Response) =>
       status: status || 'published',
     },
   });
+
+  // Trigger Notifications if Published
+  if (item.status === 'published') {
+    const isAnnouncement = item.type === 'ANNOUNCEMENT';
+    const isPromotion = item.type === 'BANNER' || (item.category && item.category.toLowerCase().includes('promotion'));
+
+    if (isAnnouncement || isPromotion) {
+        // Find users who have opted in
+        // optimization: select only id to minimize data transfer
+        const where: any = { is_active: true };
+        
+        if (isAnnouncement) where.notif_system_updates = true;
+        if (isPromotion) where.notif_promotions = true;
+
+        const users = await prisma.user.findMany({
+            where,
+            select: { id: true }
+        });
+
+        const userIds = users.map(u => u.id);
+
+        if (userIds.length > 0) {
+            // Send in background (don't await)
+            NotificationService.sendBulkNotification(
+                userIds,
+                {
+                    type: isAnnouncement ? 'system_update' : 'promotion',
+                    title: item.title,
+                    body: item.content.substring(0, 100) + (item.content.length > 100 ? '...' : ''), // Truncate body
+                    data: { cmsId: item.id }
+                } as any
+            ).catch(err => console.error('Bulk notification error:', err));
+        }
+    }
+  }
 
   res.status(201).json({
     success: true,

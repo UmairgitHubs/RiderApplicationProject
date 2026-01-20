@@ -10,6 +10,8 @@ import {
   getSessions,
   toggleTwoFactor,
   getActivityLogs,
+  exportData,
+  deleteAccount,
 } from '../controllers/profile.controller';
 import { authenticate } from '../middleware/auth.middleware';
 
@@ -28,6 +30,8 @@ router.delete('/addresses/:id', deleteAddress);
 router.get('/sessions', getSessions);
 router.post('/2fa/toggle', toggleTwoFactor);
 router.get('/activity-logs', getActivityLogs);
+router.get('/export', exportData);
+router.delete('/', deleteAccount);
 
 export default router;
 

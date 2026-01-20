@@ -154,3 +154,183 @@ export const markAsRead = asyncHandler(async (req: AuthRequest, res: Response) =
 
     res.json({ success: true });
 });
+
+/**
+ * Get or create a support conversation for the current user
+ */
+export const getSupportConversation = asyncHandler(async (req: AuthRequest, res: Response) => {
+    const userId = req.user?.id;
+
+    if (!userId) {
+        return res.status(401).json({ success: false, error: { message: 'Unauthorized' } });
+    }
+
+    // Look for an existing 'Support Chat' ticket that is not closed
+    let ticket = await prisma.supportTicket.findFirst({
+        where: {
+            user_id: userId,
+            category: 'Support Chat',
+            status: { not: 'Closed' }
+        },
+        orderBy: { created_at: 'desc' }
+    });
+
+    if (!ticket) {
+        // Create a new support ticket for chat
+        const lastTicket = await prisma.supportTicket.findFirst({
+            orderBy: { created_at: 'desc' },
+            select: { ticket_number: true }
+        });
+
+        let nextNumber = 1001;
+        if (lastTicket && lastTicket.ticket_number.startsWith('TKT-')) {
+            const num = parseInt(lastTicket.ticket_number.split('-')[1].replace(/\D/g, ''));
+            if (!isNaN(num)) nextNumber = num + 1;
+        }
+
+        ticket = await prisma.supportTicket.create({
+            data: {
+                ticket_number: `TKT-${nextNumber}`,
+                user_id: userId,
+                subject: 'Live Support Chat',
+                category: 'Support Chat',
+                priority: 'Medium',
+                status: 'Open'
+            }
+        });
+    }
+
+    res.json({
+        success: true,
+        data: ticket
+    });
+});
+
+/**
+ * Get messages for a support conversation
+ */
+export const getSupportMessages = asyncHandler(async (req: AuthRequest, res: Response) => {
+    const { conversationId } = req.params;
+    const userId = req.user?.id;
+
+    if (!userId) {
+        return res.status(401).json({ success: false, error: { message: 'Unauthorized' } });
+    }
+
+    const messages = await prisma.supportMessage.findMany({
+        where: { ticket_id: conversationId },
+        orderBy: { created_at: 'asc' },
+        include: {
+            sender: {
+                select: { id: true, full_name: true, role: true }
+            }
+        }
+    });
+
+    res.json({
+        success: true,
+        data: {
+            messages: messages.map(m => ({
+                id: m.id,
+                text: m.message,
+                senderId: m.sender_id,
+                senderRole: m.sender.role,
+                createdAt: m.created_at,
+                isRead: m.is_read
+            }))
+        }
+    });
+});
+
+/**
+ * Send a message to support
+ */
+export const sendSupportMessage = asyncHandler(async (req: AuthRequest, res: Response) => {
+    const { text, conversationId } = req.body;
+    const userId = req.user?.id;
+
+    if (!text || !userId) {
+        return res.status(400).json({ success: false, error: { message: 'Message text is required' } });
+    }
+
+    let targetConversationId = conversationId;
+
+    if (!targetConversationId) {
+        // Find latest open support chat ticket
+        const ticket = await prisma.supportTicket.findFirst({
+            where: {
+                user_id: userId,
+                category: 'Support Chat',
+                status: { not: 'Closed' }
+            },
+            orderBy: { created_at: 'desc' }
+        });
+        
+        if (ticket) {
+            targetConversationId = ticket.id;
+        } else {
+             // Create a new support ticket for chat
+             const lastTicket = await prisma.supportTicket.findFirst({
+                orderBy: { created_at: 'desc' },
+                select: { ticket_number: true }
+            });
+
+            let nextNumber = 1001;
+            if (lastTicket && lastTicket.ticket_number.startsWith('TKT-')) {
+                const num = parseInt(lastTicket.ticket_number.split('-')[1].replace(/\D/g, ''));
+                if (!isNaN(num)) nextNumber = num + 1;
+            }
+
+            const newTicket = await prisma.supportTicket.create({
+                data: {
+                    ticket_number: `TKT-${nextNumber}`,
+                    user_id: userId,
+                    subject: 'Live Support Chat',
+                    category: 'Support Chat',
+                    priority: 'Medium',
+                    status: 'Open'
+                }
+            });
+            targetConversationId = newTicket.id;
+        }
+    }
+
+    const message = await prisma.supportMessage.create({
+        data: {
+            ticket_id: targetConversationId,
+            sender_id: userId,
+            message: text
+        },
+        include: {
+            sender: {
+                select: { id: true, full_name: true, role: true }
+            }
+        }
+    });
+
+    // Notify admins via socket
+    io.to('role:admin').emit('support:new-message', {
+        ticketId: targetConversationId,
+        message: {
+            id: message.id,
+            text: message.message,
+            senderId: message.sender_id,
+            senderRole: message.sender.role,
+            createdAt: message.created_at
+        }
+    });
+
+    res.status(201).json({
+        success: true,
+        data: {
+            message: {
+                id: message.id,
+                text: message.message,
+                senderId: message.sender_id,
+                senderRole: message.sender.role,
+                createdAt: message.created_at
+            },
+            conversationId: targetConversationId
+        }
+    });
+});

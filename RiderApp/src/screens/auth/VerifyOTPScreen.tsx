@@ -29,6 +29,7 @@ export default function VerifyOTPScreen({ navigation, route }: VerifyOTPScreenPr
   const inputRefs = useRef<(TextInput | null)[]>([]);
 
   const email = route.params?.email || '';
+  const isLogin = (route.params as any)?.isLogin;
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -87,19 +88,41 @@ export default function VerifyOTPScreen({ navigation, route }: VerifyOTPScreenPr
     setLoading(true);
 
     try {
-      const response = await authApi.verifyOTP(email, otpCode);
-
-      if (response.success) {
-        // Navigate to reset password screen with email and code
-        navigation.navigate('ResetPassword', { email, code: otpCode });
+      if (isLogin) {
+          // Handle 2FA Login
+          const response: any = await authApi.verifyLoginTwoFactor(email, otpCode);
+          if (response.success && response.data?.token) {
+              const userRole = response.data.user?.role?.toLowerCase();
+              if (userRole === "merchant") {
+                  navigation.replace("MerchantApp");
+              } else if (userRole === "rider") {
+                  navigation.replace("RiderApp");
+              } else {
+                  Alert.alert("Error", `Unknown user role: ${userRole}`);
+              }
+          } else {
+               Alert.alert('Verification Failed', response.error?.message || 'Invalid code.');
+               setOtp(['', '', '', '', '', '']);
+               // inputRefs check
+               if (inputRefs.current[0]) inputRefs.current[0].focus();
+          }
       } else {
-        Alert.alert(
-          'Verification Failed',
-          response.error?.message || 'Invalid or expired verification code. Please try again.'
-        );
-        // Clear OTP inputs
-        setOtp(['', '', '', '', '', '']);
-        inputRefs.current[0]?.focus();
+          // Handle Password Reset OTP
+          const response: any = await authApi.verifyOTP(email, otpCode);
+
+          if (response.success) {
+            // Navigate to reset password screen with email and code
+            navigation.navigate('ResetPassword', { email, code: otpCode });
+          } else {
+            Alert.alert(
+              'Verification Failed',
+              response.error?.message || 'Invalid or expired verification code. Please try again.'
+            );
+            // Clear OTP inputs
+            setOtp(['', '', '', '', '', '']);
+            // inputRefs check
+             if (inputRefs.current[0]) inputRefs.current[0].focus();
+          }
       }
     } catch (error: any) {
       console.error('Verify OTP error:', error);

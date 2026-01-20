@@ -179,13 +179,106 @@ export const setupSocket = (io: Server) => {
       }
     });
 
-    // Handle support typing indicators
-    socket.on('support:typing', (data: { ticketId: string; isTyping: boolean; targetId: string }) => {
-      io.to(`user:${data.targetId}`).emit('support:typing', {
-        ticketId: data.ticketId,
-        isTyping: data.isTyping,
-        senderId: userId
-      });
+    // --- Order Chat Integration ---
+    
+    // Join a room for a specific order/shipment
+    socket.on('join_order', async (data: { orderId: string }) => {
+      try {
+        const { orderId } = data;
+        
+        // Security check: must be merchant, rider, or admin
+        const shipment = await prisma.shipment.findUnique({
+          where: { id: orderId },
+          select: { merchant_id: true, rider_id: true }
+        });
+
+        if (!shipment) {
+          socket.emit('error', { message: 'Order not found' });
+          return;
+        }
+
+        const isAllowed = 
+          shipment.merchant_id === userId || 
+          shipment.rider_id === userId || 
+          userRole === 'admin';
+
+        if (!isAllowed) {
+          socket.emit('error', { message: 'Unauthorized: You are not a participant in this order' });
+          return;
+        }
+
+        socket.join(`order:${orderId}`);
+        logger.info(`User ${userId} joined order room: ${orderId}`);
+        socket.emit('join_order:success', { orderId });
+      } catch (error) {
+        logger.error('join_order error:', error);
+      }
+    });
+
+    // Send a message within an order room
+    socket.on('send_message', async (data: { orderId: string; content: string; recipientId: string }) => {
+      try {
+        const { orderId, content, recipientId } = data;
+
+        // Save message via Prisma
+        const message = await prisma.chatMessage.create({
+          data: {
+            shipment_id: orderId,
+            sender_id: userId,
+            recipient_id: recipientId,
+            content: content,
+          },
+          include: {
+            sender: {
+              select: { id: true, full_name: true, role: true }
+            }
+          }
+        });
+
+        // Emit message to the room
+        io.to(`order:${orderId}`).emit('chat:new-message', {
+          orderId,
+          message: {
+            id: message.id,
+            content: message.content,
+            senderId: message.sender_id,
+            senderName: message.sender.full_name,
+            createdAt: message.created_at
+          }
+        });
+
+        // Offline logic: If recipient is not in the room
+        const room = io.sockets.adapter.rooms.get(`order:${orderId}`);
+        const recipientRoom = io.sockets.adapter.rooms.get(`user:${recipientId}`);
+        
+        // Check if recipient is "offline" (not connected to socket or not in the order room)
+        const isRecipientInOrderRoom = room && Array.from(room).some(id => {
+          const s = io.sockets.sockets.get(id) as AuthenticatedSocket;
+          return s && s.user?.id === recipientId;
+        });
+
+        if (!isRecipientInOrderRoom) {
+          const recipient = await prisma.user.findUnique({
+            where: { id: recipientId },
+            select: { fcm_token: true }
+          });
+
+          if (recipient?.fcm_token) {
+            const { sendPushNotification } = await import('../services/firebase.service');
+            await sendPushNotification(
+              recipient.fcm_token,
+              `New message from ${socket.user?.fullName || 'User'}`,
+              content,
+              { orderId, type: 'chat' }
+            );
+          }
+        }
+
+        socket.emit('send_message:success', { messageId: message.id });
+      } catch (error) {
+        logger.error('send_message error:', error);
+        socket.emit('error', { message: 'Failed to send message' });
+      }
     });
 
     // Handle disconnect

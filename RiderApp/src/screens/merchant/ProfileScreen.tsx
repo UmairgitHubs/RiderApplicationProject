@@ -13,7 +13,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, typography, spacing, borderRadius } from "../../theme";
-import { profileApi, authApi } from "../../services/api";
+import { profileApi, authApi, deliveredOrdersApi, addressApi } from "../../services/api";
 
 interface ProfileData {
   id: string;
@@ -32,6 +32,15 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [deliveredStats, setDeliveredStats] = useState({
+    total: 0,
+    recent: 0,
+    totalValue: 0,
+  });
+  const [addressesData, setAddressesData] = useState({
+    total: 0,
+    defaultAddress: null as any,
+  });
 
   useFocusEffect(
     React.useCallback(() => {
@@ -42,12 +51,54 @@ export default function ProfileScreen() {
   const fetchProfile = async () => {
     try {
       setLoading(true);
-      const response = await profileApi.getProfile();
-      if (response.success && response.data?.profile) {
-        setProfile(response.data.profile);
+      
+      // Fetch profile, delivered orders, and addresses in parallel for optimal performance
+      const [profileResponse, ordersResponse, addressesResponse]: any[] = await Promise.all([
+        profileApi.getProfile(),
+        deliveredOrdersApi.getDeliveredOrders({ limit: 100 }),
+        addressApi.getAddresses()
+      ]);
+      
+      // Set profile data
+      if (profileResponse.success && profileResponse.data?.profile) {
+        setProfile(profileResponse.data.profile);
+      }
+      
+      // Calculate delivered orders stats
+      if (ordersResponse.success && ordersResponse.data?.shipments) {
+        const deliveredOrders = ordersResponse.data.shipments;
+        const total = deliveredOrders.length;
+        
+        // Calculate recent deliveries (last 7 days)
+        const oneWeekAgo = new Date();
+        oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+        
+        const recent = deliveredOrders.filter((order: any) => {
+          const deliveredDate = new Date(order.delivered_at || order.created_at);
+          return deliveredDate >= oneWeekAgo;
+        }).length;
+        
+        // Calculate total value
+        const totalValue = deliveredOrders.reduce((sum: number, order: any) => {
+          return sum + (parseFloat(order.cod_amount?.toString() || '0') || 0);
+        }, 0);
+        
+        setDeliveredStats({ total, recent, totalValue });
+      }
+      
+      // Process addresses data
+      if (addressesResponse.success && addressesResponse.data?.addresses) {
+        const addresses = addressesResponse.data.addresses;
+        const total = addresses.length;
+        const defaultAddress = addresses.find((addr: any) => addr.is_default) || addresses[0] || null;
+        
+        setAddressesData({ total, defaultAddress });
       }
     } catch (error: any) {
       console.error("Error fetching profile:", error);
+      // Set default stats on error
+      setDeliveredStats({ total: 0, recent: 0, totalValue: 0 });
+      setAddressesData({ total: 0, defaultAddress: null });
     } finally {
       setLoading(false);
     }
@@ -224,6 +275,58 @@ export default function ProfileScreen() {
           >
             <Text style={styles.editButtonText}>Edit Profile</Text>
           </TouchableOpacity>
+        </View>
+
+        {/* Delivered Orders Summary Card */}
+        <View style={styles.deliveredSummaryCard}>
+          <View style={styles.deliveredSummaryHeader}>
+            <View style={styles.deliveredSummaryTitleRow}>
+              <Ionicons name="checkmark-circle" size={24} color={colors.success} />
+              <Text style={styles.deliveredSummaryTitle}>Delivered Orders</Text>
+            </View>
+            <TouchableOpacity onPress={() => handleNavigation("DeliveredOrders")}>
+              <Text style={styles.viewAllText}>View All</Text>
+            </TouchableOpacity>
+          </View>
+
+          {loading ? (
+            <View style={styles.deliveredSummaryLoading}>
+              <ActivityIndicator size="small" color={colors.primary} />
+            </View>
+          ) : (
+            <>
+              <View style={styles.deliveredStatsRow}>
+                <View style={styles.deliveredStatItem}>
+                  <Text style={[styles.deliveredStatNumber, { color: colors.success }]}>
+                    {deliveredStats.total}
+                  </Text>
+                  <Text style={styles.deliveredStatLabel}>Total</Text>
+                </View>
+                <View style={styles.deliveredStatDivider} />
+                <View style={styles.deliveredStatItem}>
+                  <Text style={[styles.deliveredStatNumber, { color: colors.info }]}>
+                    {deliveredStats.recent}
+                  </Text>
+                  <Text style={styles.deliveredStatLabel}>This Week</Text>
+                </View>
+                <View style={styles.deliveredStatDivider} />
+                <View style={styles.deliveredStatItem}>
+                  <Text style={[styles.deliveredStatNumber, { color: colors.primary }]}>
+                    ${deliveredStats.totalValue.toFixed(0)}
+                  </Text>
+                  <Text style={styles.deliveredStatLabel}>Value</Text>
+                </View>
+              </View>
+
+              <TouchableOpacity 
+                style={styles.deliveredViewButton}
+                onPress={() => handleNavigation("DeliveredOrders")}
+              >
+                <Text style={styles.deliveredViewButtonText}>View Delivered Orders</Text>
+                <Ionicons name="arrow-forward" size={18} color={colors.primary} />
+              </TouchableOpacity>
+            </>
+          )}
         </View>
 
         {/* Order Management Section */}
@@ -590,5 +693,81 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.xs,
     color: colors.textLight,
     marginBottom: spacing.xs,
+  },
+  deliveredSummaryCard: {
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.lg,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  deliveredSummaryHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: spacing.md,
+  },
+  deliveredSummaryTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  deliveredSummaryTitle: {
+    fontSize: typography.fontSize.lg,
+    fontWeight: typography.fontWeight.bold,
+    color: colors.text,
+    marginLeft: spacing.sm,
+  },
+  viewAllText: {
+    fontSize: typography.fontSize.sm,
+    color: colors.primary,
+    fontWeight: typography.fontWeight.medium,
+  },
+  deliveredSummaryLoading: {
+    paddingVertical: spacing.xl,
+    alignItems: "center",
+  },
+  deliveredStatsRow: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    marginBottom: spacing.md,
+  },
+  deliveredStatItem: {
+    alignItems: "center",
+    flex: 1,
+  },
+  deliveredStatNumber: {
+    fontSize: typography.fontSize["2xl"],
+    fontWeight: typography.fontWeight.bold,
+    marginBottom: spacing.xs,
+  },
+  deliveredStatLabel: {
+    fontSize: typography.fontSize.xs,
+    color: colors.textLight,
+    textTransform: "uppercase",
+  },
+  deliveredStatDivider: {
+    width: 1,
+    backgroundColor: colors.border,
+    marginHorizontal: spacing.sm,
+  },
+  deliveredViewButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.backgroundLight,
+    borderRadius: borderRadius.md,
+    paddingVertical: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  deliveredViewButtonText: {
+    fontSize: typography.fontSize.sm,
+    color: colors.primary,
+    fontWeight: typography.fontWeight.medium,
+    marginRight: spacing.xs,
   },
 });

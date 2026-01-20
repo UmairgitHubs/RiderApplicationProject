@@ -18,12 +18,14 @@ Request handlers responsible for processing incoming requests and returning resp
   - `admin.merchant.controller.ts`: Merchant management.
   - `admin.payment.controller.ts`: Payment oversight.
   - `admin.rider.controller.ts`: Rider management.
+  - `admin.route.controller.ts`: Route management.
   - `admin.shipment.controller.ts`: Shipment oversight.
   - `admin.support.controller.ts`: Support ticket management.
   - `admin.wallet.controller.ts`: Wallet/Transaction management.
 - **Features**:
   - `analytics.controller.ts`: Dashboard analytics.
   - `auth.controller.ts`: Authentication (Login, Register, OTP).
+  - `chat.controller.ts`: Shipment and support chat.
   - `notification.controller.ts`: Notifications handling.
   - `profile.controller.ts`: User profile management.
   - `rider.controller.ts`: Rider-specific operations.
@@ -43,6 +45,7 @@ API route definitions mapping URLs to controllers.
   - `admin.merchant.routes.ts`
   - `admin.payment.routes.ts`
   - `admin.rider.routes.ts`
+  - `admin.route.routes.ts`
   - `admin.settings.routes.ts`
   - `admin.shipment.routes.ts`
   - `admin.support.routes.ts`
@@ -50,6 +53,7 @@ API route definitions mapping URLs to controllers.
 - **Feature Routes**:
   - `analytics.routes.ts`
   - `auth.routes.ts`
+  - `chat.routes.ts`
   - `notification.routes.ts`
   - `profile.routes.ts`
   - `rider.routes.ts`

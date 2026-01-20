@@ -151,12 +151,26 @@ export default function RiderOrderDetailsScreen({ navigation, route }: any) {
                   <Text style={styles.infoValue}>{order.merchantName}</Text>
                 </View>
               </View>
-              <TouchableOpacity 
-                style={styles.callButton}
-                onPress={() => handleCall(order.merchantPhone, order.merchantName)}
-              >
-                <Ionicons name="call" size={20} color={colors.textWhite} />
-              </TouchableOpacity>
+              <View style={styles.actionButtons}>
+                <TouchableOpacity 
+                  style={styles.callButton}
+                  onPress={() => handleCall(order.merchantPhone, order.merchantName)}
+                >
+                  <Ionicons name="call" size={20} color={colors.textWhite} />
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.callButton, { backgroundColor: colors.info }]}
+                  onPress={() => navigation.navigate('Chat', {
+                    recipientName: order.merchantName,
+                    recipientRole: 'Merchant',
+                    recipientId: 'merchant-id-123', // This should be dynamic
+                    recipientPhone: order.merchantPhone,
+                    shipmentId: order.trackingId // This should be dynamic
+                  })}
+                >
+                  <Ionicons name="chatbubble-ellipses" size={20} color={colors.textWhite} />
+                </TouchableOpacity>
+              </View>
             </View>
             <Text style={styles.address}>{order.pickupAddress}</Text>
             <TouchableOpacity 
@@ -183,12 +197,26 @@ export default function RiderOrderDetailsScreen({ navigation, route }: any) {
                   <Text style={styles.infoValue}>{order.recipientName}</Text>
                 </View>
               </View>
-              <TouchableOpacity 
-                style={styles.callButton}
-                onPress={() => handleCall(order.recipientPhone, order.recipientName)}
-              >
-                <Ionicons name="call" size={20} color={colors.textWhite} />
-              </TouchableOpacity>
+              <View style={styles.actionButtons}>
+                <TouchableOpacity 
+                  style={styles.callButton}
+                  onPress={() => handleCall(order.recipientPhone, order.recipientName)}
+                >
+                  <Ionicons name="call" size={20} color={colors.textWhite} />
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.callButton, { backgroundColor: colors.info }]}
+                  onPress={() => navigation.navigate('Chat', {
+                    recipientName: order.recipientName,
+                    recipientRole: 'Customer',
+                    recipientId: 'customer-id-456',
+                    recipientPhone: order.recipientPhone,
+                    shipmentId: order.trackingId
+                  })}
+                >
+                  <Ionicons name="chatbubble-ellipses" size={20} color={colors.textWhite} />
+                </TouchableOpacity>
+              </View>
             </View>
             <Text style={styles.address}>{order.deliveryAddress}</Text>
             <TouchableOpacity 
@@ -458,6 +486,10 @@ const styles = StyleSheet.create({
     backgroundColor: colors.success,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    gap: spacing.sm,
   },
   address: {
     fontSize: typography.fontSize.base,

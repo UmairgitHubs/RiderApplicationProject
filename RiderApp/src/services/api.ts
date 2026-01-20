@@ -11,6 +11,16 @@ import { Platform } from "react-native";
 // Found: 192.168.100.223
 const COMPUTER_IP = "192.168.100.223"; // Update this if your IP changes
 
+export interface ApiResponse<T = any> {
+  success: boolean;
+  data?: T;
+  message?: string;
+  error?: {
+    message: string;
+    code?: string;
+  };
+}
+
 // Detect platform and set appropriate URL
 const getApiBaseUrl = () => {
   if (__DEV__) {
@@ -266,6 +276,27 @@ export const authApi = {
     return response;
   },
 
+  verifyLoginTwoFactor: async (email: string, code: string) => {
+    const response = await api.post<any>("/auth/verify-2fa-login", { email, code });
+    // Store token and user data if successful
+    if (response.success && response.data?.token) {
+      await AsyncStorage.setItem("@auth_token", response.data.token);
+      if (response.data.refreshToken) {
+        await AsyncStorage.setItem(
+          "@refresh_token",
+          response.data.refreshToken
+        );
+      }
+      if (response.data.user) {
+        await AsyncStorage.setItem(
+          "@user_data",
+          JSON.stringify(response.data.user)
+        );
+      }
+    }
+    return response;
+  },
+
   register: async (data: {
     email: string;
     password: string;
@@ -358,6 +389,15 @@ export const profileApi = {
     country?: string;
     emergencyContactName?: string;
     emergencyContactPhone?: string;
+    emailNotifications?: boolean;
+    pushNotifications?: boolean;
+    smsNotifications?: boolean;
+    weeklyReports?: boolean;
+    notifOrderUpdates?: boolean;
+    notifDeliveryAlerts?: boolean;
+    notifPayments?: boolean;
+    notifPromotions?: boolean;
+    notifSystemUpdates?: boolean;
   }) => {
     return api.patch("/profile", data);
   },
@@ -367,6 +407,18 @@ export const profileApi = {
       currentPassword,
       newPassword,
     });
+  },
+
+  toggleTwoFactor: async (enabled: boolean) => {
+    return api.post("/profile/2fa/toggle", { enabled });
+  },
+
+  exportData: async () => {
+    return api.get("/profile/export");
+  },
+
+  deleteAccount: async () => {
+    return api.delete("/profile/");
   },
 };
 
@@ -438,7 +490,7 @@ export const addressApi = {
 export const chatApi = {
   // Get or create support conversation
   getSupportConversation: async () => {
-    return api.get("/chat/support/conversation");
+    return api.get<ApiResponse>("/chat/support/conversation");
   },
 
   // Get messages for a conversation
@@ -449,19 +501,19 @@ export const chatApi = {
     const queryString = params
       ? "?" + new URLSearchParams(params as any).toString()
       : "";
-    return api.get(
+    return api.get<ApiResponse>(
       `/chat/conversations/${conversationId}/messages${queryString}`
     );
   },
 
   // Send message to support
   sendMessage: async (data: { text: string; conversationId?: string }) => {
-    return api.post("/chat/support/messages", data);
+    return api.post<ApiResponse>("/chat/support/messages", data);
   },
 
   // Mark all notifications as read
   markAllAsRead: async () => {
-    return api.put('/notifications/mark-all-read', {});
+    return api.put<ApiResponse>('/notifications/mark-all-read', {});
   },
 
   // Shipment specific methods
@@ -578,6 +630,16 @@ export const notificationsApi = {
   // Delete notification
   deleteNotification: async (notificationId: string) => {
     return api.delete(`/notifications/${notificationId}`);
+  },
+};
+
+// Notifications API remains as is...
+// ... (I'll keep the existing tail and add my part)
+
+// Settings API
+export const settingsApi = {
+  getSystemInfo: async () => {
+    return api.get<ApiResponse>("/settings/info");
   },
 };
 

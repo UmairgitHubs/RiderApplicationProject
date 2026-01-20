@@ -44,7 +44,7 @@ export default function ManageAddressesScreen() {
 
   const fetchUserInfo = async () => {
     try {
-      const response = await profileApi.getProfile();
+      const response: any = await profileApi.getProfile();
       if (response.success && response.data?.profile) {
         const profile = response.data.profile;
         setUserName(profile.fullName || 'John Doe');
@@ -58,7 +58,7 @@ export default function ManageAddressesScreen() {
   const fetchAddresses = async () => {
     try {
       setLoading(true);
-      const response = await addressApi.getAddresses();
+      const response: any = await addressApi.getAddresses();
       console.log('Address API Response:', JSON.stringify(response, null, 2));
       if (response.success && response.data?.addresses) {
         console.log('Addresses found:', response.data.addresses.length);
@@ -77,7 +77,7 @@ export default function ManageAddressesScreen() {
 
   const handleSetDefault = async (id: string) => {
     try {
-      const response = await addressApi.updateAddress(id, { isDefault: true });
+      const response: any = await addressApi.updateAddress(id, { isDefault: true });
       if (response.success) {
         await fetchAddresses();
       } else {
@@ -100,7 +100,7 @@ export default function ManageAddressesScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              const response = await addressApi.deleteAddress(id);
+              const response: any = await addressApi.deleteAddress(id);
               if (response.success) {
                 await fetchAddresses();
               } else {
@@ -129,12 +129,21 @@ export default function ManageAddressesScreen() {
   };
 
   const handleEdit = (address: Address) => {
-    const parent = navigation.getParent();
-    if (parent) {
-      parent.navigate('ComingSoon', {
-        featureName: 'Edit Address',
-        description: 'Address editing form will be available soon!',
-      });
+    console.log('Edit button clicked for address:', address.id);
+    console.log('Address data:', JSON.stringify(address, null, 2));
+    
+    // Get the root navigator (Stack navigator that contains all screens)
+    const rootNavigator = navigation.getParent() || navigation;
+    
+    console.log('Root navigator exists:', !!rootNavigator);
+    console.log('Navigate function exists:', typeof rootNavigator.navigate === 'function');
+    
+    if (rootNavigator && typeof rootNavigator.navigate === 'function') {
+      console.log('Navigating to EditAddress with address data');
+      rootNavigator.navigate('EditAddress', { address });
+    } else {
+      console.error('Navigation not available');
+      Alert.alert('Error', 'Unable to navigate. Please try again.');
     }
   };
 

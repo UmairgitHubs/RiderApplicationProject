@@ -39,7 +39,13 @@ export const getProfile = async (req: Request, res: Response) => {
       themePreference: user.theme_preference,
       emailNotifications: user.email_notifications,
       pushNotifications: user.push_notifications,
+      smsNotifications: user.sms_notifications,
       weeklyReports: user.weekly_reports,
+      notifOrderUpdates: user.notif_order_updates,
+      notifDeliveryAlerts: user.notif_delivery_alerts,
+      notifPayments: user.notif_payments,
+      notifPromotions: user.notif_promotions,
+      notifSystemUpdates: user.notif_system_updates,
       twoFactorEnabled: user.two_factor_enabled,
       createdAt: user.created_at,
     };
@@ -47,6 +53,8 @@ export const getProfile = async (req: Request, res: Response) => {
     if (user.role === 'merchant' && user.merchant) {
       profile.businessName = user.merchant.business_name;
       profile.businessType = user.merchant.business_type;
+      profile.businessAddress = user.merchant.address;
+      profile.address = user.merchant.address; // For backwards compatibility
       profile.walletBalance = user.merchant.wallet_balance;
       profile.totalSpent = user.merchant.total_spent;
     }
@@ -92,13 +100,20 @@ export const updateProfile = async (req: Request, res: Response) => {
       themePreference,
       emailNotifications,
       pushNotifications,
+      smsNotifications,
       weeklyReports,
+      notifOrderUpdates,
+      notifDeliveryAlerts,
+      notifPayments,
+      notifPromotions,
+      notifSystemUpdates,
       businessName,
       businessType,
       cnic,
       licenseNumber,
       vehicleType,
       vehicleNumber,
+      address,
     } = req.body;
 
     const user = await prisma.user.findUnique({
@@ -148,7 +163,13 @@ export const updateProfile = async (req: Request, res: Response) => {
         ...(themePreference && { theme_preference: themePreference }),
         ...(emailNotifications !== undefined && { email_notifications: emailNotifications }),
         ...(pushNotifications !== undefined && { push_notifications: pushNotifications }),
+        ...(smsNotifications !== undefined && { sms_notifications: smsNotifications }),
         ...(weeklyReports !== undefined && { weekly_reports: weeklyReports }),
+        ...(notifOrderUpdates !== undefined && { notif_order_updates: notifOrderUpdates }),
+        ...(notifDeliveryAlerts !== undefined && { notif_delivery_alerts: notifDeliveryAlerts }),
+        ...(notifPayments !== undefined && { notif_payments: notifPayments }),
+        ...(notifPromotions !== undefined && { notif_promotions: notifPromotions }),
+        ...(notifSystemUpdates !== undefined && { notif_system_updates: notifSystemUpdates }),
       },
     });
 
@@ -159,6 +180,7 @@ export const updateProfile = async (req: Request, res: Response) => {
         data: {
           ...(businessName && { business_name: businessName }),
           ...(businessType && { business_type: businessType }),
+          ...(address && { address: address }),
         },
       });
     }
@@ -175,7 +197,8 @@ export const updateProfile = async (req: Request, res: Response) => {
       });
     }
 
-    logger.info(`Profile updated for user ${userId}. Details: Notifications(Email=${emailNotifications}, Push=${pushNotifications}), WeeklyReports=${weeklyReports}`);
+
+    logger.info(`Profile updated for user ${userId}. Details: Notifications(Email=${updatedUser.email_notifications}, Push=${updatedUser.push_notifications}, SMS=${updatedUser.sms_notifications}), WeeklyReports=${updatedUser.weekly_reports}`);
 
     res.json({
       success: true,
@@ -188,6 +211,7 @@ export const updateProfile = async (req: Request, res: Response) => {
           profileImageUrl: updatedUser.profile_image_url,
           emailNotifications: updatedUser.email_notifications,
           pushNotifications: updatedUser.push_notifications,
+          smsNotifications: updatedUser.sms_notifications,
           weeklyReports: updatedUser.weekly_reports,
           languagePreference: updatedUser.language_preference,
           themePreference: updatedUser.theme_preference,
@@ -587,6 +611,96 @@ export const getActivityLogs = async (req: Request, res: Response) => {
       error: {
         code: 'INTERNAL_ERROR',
         message: 'An error occurred while fetching activity logs.',
+      },
+    });
+  }
+};
+
+// Export user data
+export const exportData = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.id;
+
+    // Fetch comprehensive user data
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        merchant: true,
+        rider: true,
+        addresses: true,
+        wallet_transactions: { take: 100, orderBy: { created_at: 'desc' } }
+      }
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'User not found.' }
+      });
+    }
+
+    // Scrub sensitive data
+    const { password_hash, two_factor_secret, ...safeUserData } = user as any;
+
+    await logActivity({
+      userId,
+      action: 'Data Export',
+      description: 'User requested data export',
+      ipAddress: req.ip,
+      userAgent: req.get('User-Agent'),
+    });
+
+    res.json({
+      success: true,
+      data: safeUserData,
+      message: 'Data export generated successfully.'
+    });
+
+  } catch (error: any) {
+    logger.error('Export data error:', error);
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'An error occurred while exporting data.',
+      },
+    });
+  }
+};
+
+// Delete account
+export const deleteAccount = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.id;
+
+    // Soft delete - deactivate account
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        is_active: false
+      }
+    });
+
+    await logActivity({
+      userId,
+      action: 'Account Deletion',
+      description: 'User requested account deletion (Deactivated)',
+      ipAddress: req.ip,
+      userAgent: req.get('User-Agent'),
+    });
+
+    res.json({
+      success: true,
+      message: 'Account deleted successfully.'
+    });
+
+  } catch (error: any) {
+    logger.error('Delete account error:', error);
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'An error occurred while deleting account.',
       },
     });
   }

@@ -37,17 +37,20 @@ export default function EditProfileScreen() {
   const fetchProfile = async () => {
     try {
       setLoading(true);
-      const response = await profileApi.getProfile();
+      const response: any = await profileApi.getProfile();
+      console.log('Profile response:', response);
       if (response.success && response.data?.profile) {
         const profile = response.data.profile;
         setFullName(profile.fullName || '');
         setEmail(profile.email || '');
         setPhone(profile.phone || '');
+        // Business fields from merchant object
         setBusinessName(profile.businessName || '');
-        setBusinessAddress(profile.address || '');
+        setBusinessAddress(profile.businessAddress || profile.address || '');
       }
     } catch (error: any) {
       console.error('Error fetching profile:', error);
+      Alert.alert('Error', 'Failed to load profile data');
     } finally {
       setLoading(false);
     }
@@ -56,19 +59,30 @@ export default function EditProfileScreen() {
   const handleSaveProfile = async () => {
     try {
       setSaving(true);
-      const response = await profileApi.updateProfile({
+      
+      const updateData: any = {
         fullName,
         phone,
-        businessName,
-        address: businessAddress,
-      });
+      };
+      
+      // Add business fields if they have values
+      if (businessName) {
+        updateData.businessName = businessName;
+      }
+      if (businessAddress) {
+        updateData.address = businessAddress;
+      }
+      
+      console.log('Updating profile with:', updateData);
+      const response: any = await profileApi.updateProfile(updateData);
+      console.log('Update response:', response);
       
       if (response.success) {
         Alert.alert('Success', 'Profile updated successfully', [
           { text: 'OK', onPress: () => navigation.goBack() }
         ]);
       } else {
-        Alert.alert('Error', 'Failed to update profile. Please try again.');
+        Alert.alert('Error', response.error?.message || 'Failed to update profile. Please try again.');
       }
     } catch (error: any) {
       console.error('Error updating profile:', error);

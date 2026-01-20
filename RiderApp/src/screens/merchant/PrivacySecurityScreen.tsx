@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -15,11 +15,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, typography, spacing, borderRadius } from '../../theme';
-import { profileApi } from '../../services/api';
+import { profileApi, authApi } from '../../services/api';
 
 export default function PrivacySecurityScreen() {
   const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
+  
+  // Loading States
+  const [loading, setLoading] = useState(true);
   
   // Password fields
   const [currentPassword, setCurrentPassword] = useState('');
@@ -32,11 +35,35 @@ export default function PrivacySecurityScreen() {
 
   // Security Settings
   const [twoFactorAuth, setTwoFactorAuth] = useState(false);
-  const [loginAlerts, setLoginAlerts] = useState(true);
+  const [loginAlerts, setLoginAlerts] = useState(false); // Mapped to notifSystemUpdates
 
   // Notification Preferences
   const [emailNotifications, setEmailNotifications] = useState(true);
   const [smsAlerts, setSmsAlerts] = useState(false);
+
+  // Fetch initial settings
+  useEffect(() => {
+    fetchSettings();
+  }, []);
+
+  const fetchSettings = async () => {
+    try {
+      setLoading(true);
+      const response: any = await profileApi.getProfile();
+      if (response.success && response.data?.profile) {
+        const p = response.data.profile;
+        setTwoFactorAuth(p.twoFactorEnabled ?? false);
+        setLoginAlerts(p.notifSystemUpdates ?? false); 
+        setEmailNotifications(p.emailNotifications ?? true);
+        setSmsAlerts(p.smsNotifications ?? false);
+      }
+    } catch (error) {
+      console.error('Error fetching settings:', error);
+      Alert.alert('Error', 'Failed to load settings');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleUpdatePassword = async () => {
     // Validation
@@ -81,16 +108,78 @@ export default function PrivacySecurityScreen() {
     }
   };
 
-  const handleDownloadData = () => {
+  const handleToggleTwoFactor = async (value: boolean) => {
+    const originalValue = twoFactorAuth;
+    setTwoFactorAuth(value); // Optimistic update
+    try {
+        const response: any = await profileApi.toggleTwoFactor(value);
+        if (!response.success) {
+            setTwoFactorAuth(originalValue);
+            Alert.alert('Error', 'Failed to update 2FA settings');
+        }
+    } catch (error) {
+        setTwoFactorAuth(originalValue);
+        Alert.alert('Error', 'Failed to update 2FA settings');
+    }
+  };
+
+  const handleToggleLoginAlerts = async (value: boolean) => {
+      // Maps to System Updates for now
+      const original = loginAlerts;
+      setLoginAlerts(value);
+      try {
+          // Explicitly casting or checking API payload in api.ts
+          // updateProfile accepts notifSystemUpdates
+          const response: any = await profileApi.updateProfile({ notifSystemUpdates: value });
+          if (!response.success) setLoginAlerts(original);
+      } catch (e) {
+          setLoginAlerts(original);
+      }
+  };
+
+  const handleToggleEmail = async (value: boolean) => {
+      const original = emailNotifications;
+      setEmailNotifications(value);
+      try {
+          const response: any = await profileApi.updateProfile({ emailNotifications: value });
+          if (!response.success) setEmailNotifications(original);
+      } catch (e) {
+          setEmailNotifications(original);
+      }
+  };
+
+  const handleToggleSMS = async (value: boolean) => {
+      const original = smsAlerts;
+      setSmsAlerts(value);
+      try {
+          const response: any = await profileApi.updateProfile({ smsNotifications: value });
+          if (!response.success) setSmsAlerts(original);
+      } catch (e) {
+          setSmsAlerts(original);
+      }
+  };
+
+  const handleDownloadData = async () => {
     Alert.alert(
       'Download My Data',
-      'Your data export will be sent to your registered email address. This may take a few minutes.',
+      'This will export your personal data and recent transactions.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Request Export',
-          onPress: () => {
-            Alert.alert('Request Submitted', 'You will receive an email with your data export shortly.');
+          onPress: async () => {
+            try {
+                // In a real app, this might trigger a download or email
+                const response: any = await profileApi.exportData();
+                if (response.success) {
+                    Alert.alert('Export Ready', 'Your data has been exported successfully. In a real app, this would download a JSON file or send an email.');
+                    // console.log("Exported Data:", response.data); 
+                } else {
+                    Alert.alert('Error', 'Failed to export data');
+                }
+            } catch (error) {
+                Alert.alert('Error', 'Failed to export data');
+            }
           },
         },
       ]
@@ -100,23 +189,44 @@ export default function PrivacySecurityScreen() {
   const handleDeleteAccount = () => {
     Alert.alert(
       'Delete Account',
-      'Are you sure you want to delete your account? This action cannot be undone and all your data will be permanently deleted.',
+      'Are you sure you want to delete your account? This action cannot be undone.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Delete',
           style: 'destructive',
-          onPress: () => {
-            Alert.alert(
-              'Confirm Deletion',
-              'Please contact support@codexpress.com to complete account deletion. This requires additional verification.',
-              [{ text: 'OK' }]
-            );
+          onPress: async () => {
+             try {
+                 const response: any = await profileApi.deleteAccount();
+                 if (response.success) {
+                     // Logout and go to Auth
+                     await authApi.logout();
+                     Alert.alert('Account Deleted', 'Your account has been successfully deleted/deactivated.');
+                     // Navigate to login - access parent navigator or use reset
+                     // Assuming navigation structure allow reset or simple navigate to 'Login'
+                     navigation.reset({
+                         index: 0,
+                         routes: [{ name: 'Auth' }], 
+                     });
+                 } else {
+                     Alert.alert('Error', 'Failed to delete account');
+                 }
+             } catch (error) {
+                 Alert.alert('Error', 'Failed to delete account');
+             }
           },
         },
       ]
     );
   };
+
+  if (loading) {
+      return (
+          <View style={[styles.container, styles.centered]}>
+              <ActivityIndicator size="large" color={colors.primary} />
+          </View>
+      );
+  }
 
   return (
     <View style={styles.container}>
@@ -222,7 +332,7 @@ export default function PrivacySecurityScreen() {
           </View>
           <Switch
             value={twoFactorAuth}
-            onValueChange={setTwoFactorAuth}
+            onValueChange={handleToggleTwoFactor}
             trackColor={{ false: colors.border, true: colors.primary }}
             thumbColor={twoFactorAuth ? colors.textWhite : colors.textLight}
           />
@@ -240,7 +350,7 @@ export default function PrivacySecurityScreen() {
           </View>
           <Switch
             value={loginAlerts}
-            onValueChange={setLoginAlerts}
+            onValueChange={handleToggleLoginAlerts}
             trackColor={{ false: colors.border, true: colors.primary }}
             thumbColor={loginAlerts ? colors.textWhite : colors.textLight}
           />
@@ -261,7 +371,7 @@ export default function PrivacySecurityScreen() {
           </View>
           <Switch
             value={emailNotifications}
-            onValueChange={setEmailNotifications}
+            onValueChange={handleToggleEmail}
             trackColor={{ false: colors.border, true: colors.primary }}
             thumbColor={emailNotifications ? colors.textWhite : colors.textLight}
           />
@@ -279,7 +389,7 @@ export default function PrivacySecurityScreen() {
           </View>
           <Switch
             value={smsAlerts}
-            onValueChange={setSmsAlerts}
+            onValueChange={handleToggleSMS}
             trackColor={{ false: colors.border, true: colors.primary }}
             thumbColor={smsAlerts ? colors.textWhite : colors.textLight}
           />
@@ -321,6 +431,10 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.backgroundLight,
+  },
+  centered: {
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   header: {
     backgroundColor: colors.primary,

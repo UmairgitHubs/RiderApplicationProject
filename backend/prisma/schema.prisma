@@ -21,7 +21,13 @@ model User {
   theme_preference      String?             @default("light")
   email_notifications   Boolean             @default(true)
   push_notifications    Boolean             @default(true)
+  sms_notifications     Boolean             @default(true)
   weekly_reports        Boolean             @default(true)
+  notif_order_updates   Boolean             @default(true)
+  notif_delivery_alerts Boolean             @default(true)
+  notif_payments        Boolean             @default(true)
+  notif_promotions      Boolean             @default(false)
+  notif_system_updates  Boolean             @default(false)
   two_factor_enabled    Boolean             @default(false)
   two_factor_secret     String?
   fcm_token             String?

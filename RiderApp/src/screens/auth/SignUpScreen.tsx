@@ -85,7 +85,7 @@ export default function SignUpScreen({ navigation, route }: any) {
 
       if (response.success) {
         // Navigate directly to the app based on role (user is already logged in)
-        const userRole = response.data?.user?.role;
+        const userRole = response.data?.user?.role?.toLowerCase();
         if (userRole === "merchant") {
           navigation.replace("MerchantApp");
         } else if (userRole === "rider") {

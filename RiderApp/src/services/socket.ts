@@ -5,9 +5,8 @@ import { Platform } from 'react-native';
 const COMPUTER_IP = "192.168.100.223";
 
 const getSocketUrl = () => {
-    if (Platform.OS === 'android') {
-        return 'http://10.0.2.2:3000';
-    }
+    // For both Android and iOS, the computer IP is more reliable for physical devices
+    // and works for emulators if the IP is correct and network permits.
     return `http://${COMPUTER_IP}:3000`;
 };
 
@@ -20,13 +19,17 @@ class SocketService {
         const token = await AsyncStorage.getItem('@auth_token');
         if (!token) return null;
 
-        this.socket = io(getSocketUrl(), {
+        const url = getSocketUrl();
+        console.log(`🔌 Attempting socket connection to: ${url}`);
+
+        this.socket = io(url, {
             auth: { token },
-            transports: ['websocket', 'polling'],
+            transports: ['polling', 'websocket'], // Try polling first for reliability, then upgrade to websocket
+            forceNew: true,
             reconnection: true,
-            reconnectionAttempts: 5,
-            reconnectionDelay: 1000,
-            timeout: 10000,
+            reconnectionAttempts: 10,
+            reconnectionDelay: 2000,
+            timeout: 20000, 
         });
 
         this.socket.on('connect', () => {

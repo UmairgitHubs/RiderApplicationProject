@@ -2,6 +2,7 @@ import { Response } from 'express';
 import prisma from '../config/database';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { asyncHandler } from '../middleware/async.middleware';
+import { sendPaymentNotification } from '../services/notification.service';
 
 /**
  * Get all payment transactions with filtering and pagination
@@ -394,6 +395,20 @@ export const reconcilePayment = asyncHandler(async (req: AuthRequest, res: Respo
                 status: 'completed'
             }
         });
+
+        // 4. Send Notification
+        if (updatedPayment.status === 'completed') {
+             // Notify the user (merchant or rider) who owns this payment record
+             // We need to fetch the payment with user details if not already available, 
+             // but 'payment' variable from step 1 has user_id.
+             
+             // Import this at the top: import { sendPaymentNotification } from '../services/notification.service';
+             await sendPaymentNotification(
+                 updatedPayment.user_id,
+                 Number(updatedPayment.amount),
+                 `Payment of ${updatedPayment.currency} ${updatedPayment.amount} has been reconciled and completed.`
+             );
+        }
         
         return updatedPayment;
     });
