@@ -7,11 +7,13 @@ import {
   TouchableOpacity,
   Platform,
   Linking,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, typography, spacing, borderRadius } from '../../theme';
 import { useNavigation, useRoute } from '@react-navigation/native';
+import { shipmentApi } from '../../services/api';
 
 // Custom purple theme colors matching the design image
 const purpleTheme = {
@@ -33,11 +35,29 @@ export default function FranchiseOrderDetailsScreen() {
   const itemCount = shipment?.packageCount || 6;
   const status = 'Out for Delivery'; // Or shipment?.status
 
-  const destinations = [
-      { id: '1', name: 'Sarah Williams', address: 'Brooklyn, NY 11201', trackingId: 'CE2024-FR-001' },
-      { id: '2', name: 'Michael Chen', address: 'Queens, NY 11354', trackingId: 'CE2024-FR-002' },
-      { id: '3', name: 'Emily Rodriguez', address: 'Manhattan, NY 10002', trackingId: 'CE2024-FR-003' },
-  ];
+  const [loading, setLoading] = React.useState(true);
+  const [shipmentsList, setShipmentsList] = React.useState<any[]>([]);
+
+  React.useEffect(() => {
+    fetchBatchShipments();
+  }, [orderId]);
+
+  const fetchBatchShipments = async () => {
+      try {
+          if (!orderId) return;
+          setLoading(true);
+          // Assuming orderId passed is the batchId (which is the case from MerchantHome)
+          // We cast params to any to allow batchId which we just added to backend
+          const response = await shipmentApi.getAll({ batchId: orderId } as any) as any;
+          if (response.success && response.data?.shipments) {
+              setShipmentsList(response.data.shipments);
+          }
+      } catch (error) {
+          console.error("Failed to fetch batch shipments", error);
+      } finally {
+          setLoading(false);
+      }
+  };
 
   return (
     <View style={styles.container}>
@@ -77,7 +97,7 @@ export default function FranchiseOrderDetailsScreen() {
              <View>
                  <Text style={styles.label}>Franchise Order ID</Text>
                  <Text style={styles.orderId}>{orderId}</Text>
-                 <Text style={styles.itemCount}>{itemCount} pieces • {itemCount} different customers</Text>
+                 <Text style={styles.itemCount}>{shipmentsList.length || itemCount} pieces • {shipmentsList.length || itemCount} different customers</Text>
              </View>
              <View style={styles.statusBadge}>
                  <Text style={styles.statusText}>{status}</Text>
@@ -90,21 +110,33 @@ export default function FranchiseOrderDetailsScreen() {
             <Text style={styles.sectionTitle}>Delivery Destinations</Text>
             <Text style={styles.sectionSubtitle}>(All Trackable):</Text>
 
-            {destinations.map((dest, index) => (
-                <View key={dest.id} style={styles.destinationRow}>
-                    <View style={styles.destinationNumber}>
-                        <Text style={styles.destinationNumberText}>{dest.id}</Text>
-                    </View>
-                    <View style={styles.destinationInfo}>
-                        <View style={styles.destinationHeader}>
-                            <Text style={styles.destinationName}>{dest.name}</Text>
-                            <Ionicons name="navigate-outline" size={16} color={purpleTheme.primary} />
-                        </View>
-                        <Text style={styles.destinationAddress}>{dest.address}</Text>
-                        <Text style={styles.secondaryTrackingId}>{dest.trackingId}</Text>
-                    </View>
+            {loading ? (
+                <View style={{ padding: 20 }}>
+                     <ActivityIndicator size="small" color={colors.primary} />
                 </View>
-            ))}
+            ) : (
+                shipmentsList.map((dest, index) => (
+                    <View key={dest.id || index} style={styles.destinationRow}>
+                        <View style={styles.destinationNumber}>
+                            <Text style={styles.destinationNumberText}>{index + 1}</Text>
+                        </View>
+                        <View style={styles.destinationInfo}>
+                            <View style={styles.destinationHeader}>
+                                <Text style={styles.destinationName}>{dest.recipientName || 'Unknown Recipient'}</Text>
+                                <Ionicons name="navigate-outline" size={16} color={purpleTheme.primary} />
+                            </View>
+                            <Text style={styles.destinationAddress} numberOfLines={1}>{dest.deliveryAddress || 'No Address'}</Text>
+                            <Text style={styles.secondaryTrackingId}>{dest.trackingNumber}</Text>
+                        </View>
+                    </View>
+                ))
+            )}
+            
+            {!loading && shipmentsList.length === 0 && (
+                <Text style={{ textAlign: 'center', color: '#999', padding: 20 }}>
+                    No shipments found in this batch.
+                </Text>
+            )}
         </View>
 
         {/* Delivery Flow */}

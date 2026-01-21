@@ -215,8 +215,13 @@ export const createShipment = async (req: Request, res: Response) => {
 
         console.log(`Processing ${data.length} rows from Excel upload for batch ${batchId}`);
 
-        for (const row of data) {
-          // Map Excel columns to variables - flexible mapping
+        // We will update the Main Shipment with the first row, and create new shipments for the rest.
+        // This ensures the "Main" shipment is not a dummy duplicate.
+        
+        for (let i = 0; i < data.length; i++) {
+          const row = data[i];
+          
+          // Map Excel columns
           const rowName = row['Name'] || row['Receiver Name'] || row['Recipient'] || 'Unknown Recipient';
           const rowPhone = row['Phone'] || row['Mobile'] || row['Contact'] || recipientPhone; 
           const rowAddress = row['Address'] || row['Location'] || row['Delivery Address'] || 'Unknown Address';
@@ -226,74 +231,100 @@ export const createShipment = async (req: Request, res: Response) => {
           const rowCOD = row['COD'] || row['Amount'] || codAmount || 0;
           const rowInstructions = row['Instructions'] || row['Notes'] || specialInstructions || null;
 
-          const rowTracking = generateTrackingNumber();
+          if (i === 0) {
+              // --- ROW 0: UPDATE MAIN SHIPMENT ---
+              await prisma.shipment.update({
+                  where: { id: shipment.id },
+                  data: {
+                      recipient_name: rowName,
+                      recipient_phone: rowPhone.toString(),
+                      recipient_city: rowCity,
+                      delivery_address: rowAddress,
+                      package_type: rowType,
+                      package_weight: parseFloat(rowWeight.toString()) || 1,
+                      cod_amount: parseFloat(rowCOD.toString()) || 0,
+                      special_instructions: rowInstructions
+                  } as any
+              });
 
-          // Create shipment for each row
-          const rowShipment = await prisma.shipment.create({
-             data: {
-              tracking_number: rowTracking,
-              merchant_id: userId,
-              recipient_name: rowName,
-              recipient_phone: rowPhone, 
-              recipient_city: rowCity,
-              pickup_address: pickupAddress,
-              pickup_city: pickupCity || null,
-              hub_id: originHubId,
-              delivery_address: rowAddress,
-              package_type: rowType,
-              package_weight: parseFloat(rowWeight.toString()) || 1,
-              delivery_fee: deliveryFee,
-              status: initialStatus, // Use same status as main (assigned if rider active) or pending
-              batch_id: batchId,
-              shipment_type: 'franchise',
-              cod_amount: parseFloat(rowCOD.toString()) || 0,
-              special_instructions: rowInstructions,
-              payment_method: paymentMethod || 'wallet',
-              payment_status: 'pending',
-              merchant_note: 'Imported via Bulk Upload'
-            } as any
-          });
+              // Override packagesArray so the downstream package creation (Line 303) use this row's data
+              packagesArray = [{
+                  packageType: rowType,
+                  packageWeight: parseFloat(rowWeight.toString()) || 1,
+                  packageValue: null,
+                  packageSize: 'medium',
+                  description: rowInstructions
+              }];
+              
+          } else {
+              // --- ROW > 0: CREATE NEW SHIPMENT ---
+              const rowTracking = generateTrackingNumber();
 
-          // Create package record for this shipment
-           const pkgRecord = await prisma.package.create({
-            data: {
-              shipment_id: rowShipment.id,
-              weight: parseFloat(rowWeight.toString()) || 1,
-              dimensions: 'standard',
-              type: rowType,
-              fragile: false
-            } as any
-          });
+              const rowShipment = await prisma.shipment.create({
+                 data: {
+                  tracking_number: rowTracking,
+                  merchant_id: userId,
+                  recipient_name: rowName,
+                  recipient_phone: rowPhone.toString(), 
+                  recipient_city: rowCity,
+                  pickup_address: pickupAddress,
+                  pickup_city: pickupCity || null,
+                  hub_id: originHubId,
+                  delivery_address: rowAddress,
+                  package_type: rowType,
+                  package_weight: parseFloat(rowWeight.toString()) || 1,
+                  delivery_fee: deliveryFee,
+                  status: initialStatus,
+                  batch_id: batchId,
+                  shipment_type: 'franchise',
+                  cod_amount: parseFloat(rowCOD.toString()) || 0,
+                  special_instructions: rowInstructions,
+                  payment_method: paymentMethod || 'wallet',
+                  payment_status: 'pending'
+                } as any
+              });
 
-          // Generate barcode/QR for this package
-           const barcodeNumber = generateBarcodeNumber(rowTracking, 1);
-           const qrData = JSON.stringify({
-             barcodeNumber,
-             trackingNumber: rowTracking,
-             shipmentId: rowShipment.id,
-             packageNumber: 1,
-             packageId: `${rowShipment.id}-PKG1`
-           });
-           
-           try {
-             const qrCodeUrl = await QRCode.toDataURL(qrData);
-             await prisma.package.update({
-               where: { id: pkgRecord.id },
-               data: {
-                 barcode_number: barcodeNumber,
-                 qr_code_url: qrCodeUrl
-               }
-             });
-           } catch (e) { console.error('QR Gen Error', e); }
-          
-          // Initial History
-          await prisma.shipmentTracking.create({
-            data: {
-               shipment_id: rowShipment.id,
-               status: 'pending',
-               location_address: 'Merchant Location'
-            } as any
-          });
+              // Create package record for this shipment immediately
+               const pkgRecord = await prisma.package.create({
+                data: {
+                  shipment_id: rowShipment.id,
+                  weight: parseFloat(rowWeight.toString()) || 1,
+                  dimensions: 'standard',
+                  type: rowType,
+                  fragile: false
+                } as any
+              });
+
+              // Generate barcode/QR for this package
+               const barcodeNumber = generateBarcodeNumber(rowTracking, 1);
+               const qrData = JSON.stringify({
+                 barcodeNumber,
+                 trackingNumber: rowTracking,
+                 shipmentId: rowShipment.id,
+                 packageNumber: 1,
+                 packageId: `${rowShipment.id}-PKG1`
+               });
+               
+               try {
+                 const qrCodeUrl = await QRCode.toDataURL(qrData);
+                 await prisma.package.update({
+                   where: { id: pkgRecord.id },
+                   data: {
+                     barcode_number: barcodeNumber,
+                     qr_code_url: qrCodeUrl
+                   }
+                 });
+               } catch (e) { console.error('QR Gen Error', e); }
+              
+              // Initial History
+              await prisma.shipmentTracking.create({
+                data: {
+                   shipment_id: rowShipment.id,
+                   status: 'pending',
+                   location_address: 'Merchant Location'
+                } as any
+              });
+          }
         }
       } catch (err) {
         console.error("Error parsing Excel file:", err);
@@ -455,11 +486,16 @@ export const getShipmentStats = async (req: Request, res: Response) => {
 export const getMerchantShipments = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user?.id;
-    const { status, page = 1, limit = 20, search } = req.query;
+    const { status, page = 1, limit = 20, search, batchId } = req.query;
 
     const where: any = { merchant_id: userId };
     if (status && status !== 'all') {
       where.status = status;
+    }
+    
+    // Filter by batchId if provided
+    if (batchId) {
+      where.batch_id = batchId;
     }
 
     if (search) {
