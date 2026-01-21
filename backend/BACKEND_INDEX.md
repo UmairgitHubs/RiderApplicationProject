@@ -32,6 +32,7 @@ Request handlers responsible for processing incoming requests and returning resp
   - `settings.controller.ts`: System settings.
   - `shipment.controller.ts`: Merchant shipment operations.
   - `support.controller.ts`: Support operations.
+  - `voice.controller.ts`: Voice integration handling.
   - `wallet.controller.ts`: User wallet operations.
 
 ### 3. **Routes (`routes/`)**
@@ -59,6 +60,7 @@ API route definitions mapping URLs to controllers.
   - `rider.routes.ts`
   - `shipment.routes.ts`
   - `support.routes.ts`
+  - `voice.routes.ts`
   - `wallet.routes.ts`
 
 ### 4. **Services (`services/`)**

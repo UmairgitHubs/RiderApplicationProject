@@ -30,6 +30,9 @@ interface TicketDetailsModalProps {
  * TicketDetailsModal - A premium, fully responsive modal for managing support tickets.
  * Designed to match the high-fidelity UI requirements with clean, optimized code.
  */
+import { useSocket } from '@/lib/socket-context'
+import { useQueryClient } from '@tanstack/react-query'
+
 export function TicketDetailsModal({ ticket: initialTicket, onClose }: TicketDetailsModalProps) {
   const [mounted, setMounted] = useState(false)
   const [replyMessage, setReplyMessage] = useState('')
@@ -38,6 +41,58 @@ export function TicketDetailsModal({ ticket: initialTicket, onClose }: TicketDet
   const { data: ticketDetails, isLoading } = useTicketDetails(initialTicket.id)
   const replyMutation = useReplyTicket()
   const updateTicketMutation = useUpdateTicket()
+  
+  const { socket } = useSocket()
+  const queryClient = useQueryClient()
+
+  // Real-time message listener
+  useEffect(() => {
+    if (!socket) return
+
+    const handleNewMessage = (data: any) => {
+      // Check if message belongs to current ticket
+      if (data.ticketId === initialTicket.id || (data.message && data.message.ticket_id === initialTicket.id)) {
+        console.log('New message received:', data)
+        
+        const newMessage = data.message
+        
+        // Normalize message structure
+        const normalizedMsg = {
+          id: newMessage.id,
+          message: newMessage.message || newMessage.text,
+          created_at: newMessage.created_at || newMessage.createdAt || new Date().toISOString(),
+          sender: {
+            id: newMessage.senderId || newMessage.sender_id,
+            full_name: newMessage.senderName || newMessage.sender?.full_name || 'User',
+            role: newMessage.senderRole || newMessage.sender?.role || 'user'
+          }
+        }
+
+        // Update React Query cache
+        queryClient.setQueryData(['ticket-details', initialTicket.id], (oldData: any) => {
+          if (!oldData || !oldData.data) return oldData
+          
+          // Check if message already exists to prevent duplicates
+          const exists = oldData.data.messages.some((m: any) => m.id === normalizedMsg.id)
+          if (exists) return oldData
+
+          return {
+            ...oldData,
+            data: {
+              ...oldData.data,
+              messages: [...oldData.data.messages, normalizedMsg]
+            }
+          }
+        })
+      }
+    }
+
+    socket.on('support:new-message', handleNewMessage)
+
+    return () => {
+      socket.off('support:new-message', handleNewMessage)
+    }
+  }, [socket, initialTicket.id, queryClient])
 
   // Handle body scroll lock and mounting
   useEffect(() => {

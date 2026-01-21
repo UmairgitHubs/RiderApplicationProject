@@ -219,7 +219,7 @@ export default function ShipmentDetailsModal({ shipment, isOpen, onClose, onEdit
     doc.text("ROUTE", margin + (boxW * 2) + 6, gridY + 4);
     doc.setFontSize(11);
     doc.setTextColor(0, 0, 0);
-    const hub = d.hub || shipment?.hub || 'Central Hub';
+    const hub = d.hub || shipment?.hub || 'Unassigned';
     doc.text(hub.substring(0, 6).toUpperCase(), margin + (boxW * 2) + 4 + (boxW/2), gridY + 12, { align: 'center' });
 
     
@@ -335,7 +335,7 @@ export default function ShipmentDetailsModal({ shipment, isOpen, onClose, onEdit
         ['Delivery Fee', formatCurrency(d.delivery_fee)],
         ['Total Payable', formatCurrency(Number(d.cod_amount || 0) + Number(d.delivery_fee || 0))],
         ['Payment Status', d.payment_status || 'Pending'],
-        ['Current Hub', d.hub || 'Central Hub']
+        ['Current Hub', d.hub || 'Unassigned']
       ],
       theme: 'grid',
       headStyles: { fillColor: [249, 115, 22], textColor: 255 },
@@ -533,7 +533,7 @@ export default function ShipmentDetailsModal({ shipment, isOpen, onClose, onEdit
                     <Warehouse className="w-4 h-4" /> Hub Information
                     </div>
                     <span className="text-xs text-gray-400 block uppercase">Current Hub</span>
-                    <p className="font-medium text-gray-900">{d.hub || shipment.hub || 'Central Hub'}</p>
+                    <p className="font-medium text-gray-900">{d.hub || shipment.hub || 'Unassigned'}</p>
                 </div>
 
                 {/* Assigned Rider */}

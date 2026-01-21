@@ -4,6 +4,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Toaster } from 'sonner'
 
+import { SocketProvider } from '@/lib/socket-context'
+
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
     () =>
@@ -19,8 +21,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      {children}
-      <Toaster position="top-right" richColors />
+      <SocketProvider>
+        {children}
+        <Toaster position="top-right" richColors />
+      </SocketProvider>
     </QueryClientProvider>
   )
 }

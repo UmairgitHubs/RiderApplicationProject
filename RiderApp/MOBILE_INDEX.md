@@ -5,44 +5,50 @@ This document provides a comprehensive overview of the mobile application struct
 ## Project Structure (`src/`)
 
 ### 1. **Navigation (`navigation/`)**
-- `AppNavigator.tsx`: Root navigator that orchestrates the entire application flow.
-- `AuthStack.tsx`: Navigation flow for unauthenticated users (Login, Register, OTP).
-- `MerchantStack.tsx`: Navigation for users with the 'Merchant' role.
-- `RiderStack.tsx`: Navigation for users with the 'Rider' role.
+- `AppNavigator.tsx`: Main navigation mesh combining Auth, Merchant, and Rider stacks.
 
 ### 2. **Screens (`screens/`)**
 Organized by functional domain or role.
 
 #### **Authentication (`auth/`)**
 - `LoginScreen.tsx`
-- `RegisterScreen.tsx`
-- `OTPScreen.tsx`
+- `SignUpScreen.tsx`
+- `VerifyOTPScreen.tsx`
 - `ForgotPasswordScreen.tsx`
 - `ResetPasswordScreen.tsx`
+- `OnboardingScreen.tsx`
+- `RoleSelectionScreen.tsx`
+- `SplashScreen.tsx`
 
 #### **Merchant Flow (`merchant/`)**
 - `MerchantHome.tsx`: Dashboard for merchants.
-- `CreateShipmentScreen.tsx`: Multi-step form for creating new shipments.
-- `ShipmentsListScreen.tsx`: List of active and past shipments.
-- `ShipmentTrackingScreen.tsx`: Detailed tracking and map view for a shipment.
-- `WalletScreen.tsx`: Balance and transaction history for merchants.
-- `ManageAddressesScreen.tsx`: Merchant pickups and delivery addresses.
-- `IndividualShipmentScreen.tsx`, `FranchiseShipmentScreen.tsx`: Specialized shipment creation.
+- `CreateShipmentScreen.tsx`, `IndividualShipmentScreen.tsx`, `FranchiseShipmentScreen.tsx`.
+- `ShipmentsListScreen.tsx`, `ShipmentTrackingScreen.tsx`, `ShipmentDetailsScreen.tsx`.
+- `WalletScreen.tsx`, `PaymentMethodsScreen.tsx`.
+- `ManageAddressesScreen.tsx`, `AddAddressScreen.tsx`, `EditAddressScreen.tsx`.
+- `ProfileScreen.tsx`, `EditProfileScreen.tsx`.
+- `NotificationsScreen.tsx`, `PrivacyPolicyScreen.tsx`, `PrivacySecurityScreen.tsx`.
+- `DeliveredOrdersScreen.tsx`, `HelpCenterScreen.tsx`, `TermsConditionsScreen.tsx`.
+- `ShipmentSuccessScreen.tsx`, `ShipmentDetailsPopup.tsx`.
 
 #### **Rider Flow (`rider/`)**
-- `RiderHome.tsx`: Main screen for riders to see available orders.
-- `OrderDetailsScreen.tsx`: Info about a specific delivery.
-- `DeliveryProgressScreen.tsx`: Active delivery tracking and status updates.
-- `RiderEarningsScreen.tsx`: Financial dashboard for riders.
+- `RiderDashboard.tsx`: Main dashboard for riders.
+- `AvailableOrdersScreen.tsx`, `RiderOrderDetailsScreen.tsx`.
+- `RiderOrderHistoryScreen.tsx`, `DeliveredOrdersScreen.tsx` (chk usage).
+- `RiderEarningsScreen.tsx`, `PerformanceStatsScreen.tsx`.
+- `RiderProfileScreen.tsx`, `RiderEditProfileScreen.tsx`.
+- `RiderNotificationsScreen.tsx`.
+- `RoutePlanningScreen.tsx`, `RouteScreen.tsx`.
+- `RiderHome.tsx` (Entry).
 
 #### **Common Screens (`common/`)**
-- `ProfileScreen.tsx`: User profile overview.
-- `EditProfileScreen.tsx`: Form to update user details.
-- `SettingsScreen.tsx`: App-wide settings (Theme, Language, Notifications).
-- `ChatScreen.tsx`: Direct messaging for shipment coordination.
-- `ChatSupportScreen.tsx`: Customer support chat.
-- `NotificationSettingsScreen.tsx`: Push notification preferences.
-- `AboutScreen.tsx`, `PrivacyPolicyScreen.tsx`, `TermsConditionsScreen.tsx`.
+- `AboutScreen.tsx`.
+- `ChatScreen.tsx`, `ChatSupportScreen.tsx`.
+- `NotificationSettingsScreen.tsx`, `NotificationsWrapper.tsx`.
+- `LanguageSettingsScreen.tsx`, `DarkModeScreen.tsx`.
+- `MapSelectionScreen.tsx`.
+- `ComingSoonScreen.tsx`, `FormScreen.tsx`, `SelectionScreen.tsx`.
+- `EditProfileWrapper.tsx`.
 
 ### 3. **Components (`components/`)**
 - High-level reusable UI components and specialized UI blocks.

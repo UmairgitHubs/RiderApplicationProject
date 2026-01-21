@@ -57,6 +57,8 @@ import SelectionScreen from "../screens/common/SelectionScreen";
 import FormScreen from "../screens/common/FormScreen";
 import ChatScreen from "../screens/common/ChatScreen";
 import ShipmentTrackingScreen from "../screens/merchant/ShipmentTrackingScreen";
+import FAQScreen from '../screens/common/FAQScreen';
+import FranchiseOrderDetailsScreen from "../screens/merchant/FranchiseOrderDetailsScreen";
 
 export type RootStackParamList = {
   Splash: undefined;
@@ -124,6 +126,8 @@ export type RootStackParamList = {
   Chat: { recipientName: string; recipientRole: string; shipmentId?: string } | undefined;
   RiderApp: undefined;
   RoutePlanning: { routeType?: "urgent" | "nextDay" } | undefined;
+  FAQ: undefined;
+  FranchiseOrderDetails: { shipment?: any } | undefined;
 };
 
 const Stack = createStackNavigator<RootStackParamList>();
@@ -257,6 +261,8 @@ export default function AppNavigator() {
         <Stack.Screen name="Chat" component={ChatScreen} />
         <Stack.Screen name="ShipmentTracking" component={ShipmentTrackingScreen} />
         <Stack.Screen name="RoutePlanning" component={RoutePlanningScreen} />
+        <Stack.Screen name="FAQ" component={FAQScreen} />
+        <Stack.Screen name="FranchiseOrderDetails" component={FranchiseOrderDetailsScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

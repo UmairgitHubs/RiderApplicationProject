@@ -151,3 +151,41 @@ export const deleteCMS = asyncHandler(async (req: AuthRequest, res: Response) =>
     message: 'Item deleted successfully',
   });
 });
+
+// Get public CMS content (published only)
+export const getPublicContent = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const { type } = req.query;
+
+  const where: any = {
+    status: 'published'
+  };
+
+  if (type) {
+     const typeStr = type as string;
+     // Handle various case inputs
+     if (typeStr.toUpperCase() === 'FAQS' || typeStr === 'Faqs') {
+         where.type = 'FAQ';
+     } else {
+         where.type = typeStr.toUpperCase();
+     }
+  }
+
+  const items = await prisma.cmsContent.findMany({
+    where,
+    orderBy: { created_at: 'desc' },
+    select: {
+      id: true,
+      title: true,
+      content: true,
+      category: true,
+      image_url: true,
+      created_at: true,
+      type: true
+    }
+  });
+
+  res.json({
+    success: true,
+    data: items,
+  });
+});

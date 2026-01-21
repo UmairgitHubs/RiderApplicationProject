@@ -4,7 +4,7 @@ import prisma from '../config/database';
 import { generateToken, generateRefreshToken } from '../utils/jwt';
 import { logger } from '../utils/logger';
 import { v4 as uuidv4 } from 'uuid';
-import { sendOTPEmail } from '../services/email.service';
+import { sendOTPEmail, sendHtmlEmail } from '../services/email.service';
 import { sendSMS } from '../services/sms.service';
 import { settingsService } from '../services/settings.service';
 
@@ -219,6 +219,41 @@ export const login = async (req: Request, res: Response) => {
         expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       }
     });
+
+    // Check for Login Alerts (mapped to notif_system_updates as per frontend logic)
+    if (user.notif_system_updates) {
+        const loginTime = new Date().toLocaleString();
+        const ipAddress = req.ip || req.socket.remoteAddress || 'Unknown';
+        
+        const htmlContent = `
+            <div style="font-family: Arial, sans-serif; color: #333;">
+                <h2 style="color: #ff6b35;">New Login Detected</h2>
+                <p>Hello ${user.full_name || 'User'},</p>
+                <p>We detected a new login to your COD Express account.</p>
+                <table style="background-color: #f9f9f9; padding: 15px; border-radius: 5px; width: 100%;">
+                    <tr>
+                        <td style="padding: 5px; font-weight: bold;">Device:</td>
+                        <td style="padding: 5px;">${deviceName}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 5px; font-weight: bold;">IP Address:</td>
+                        <td style="padding: 5px;">${ipAddress}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 5px; font-weight: bold;">Time:</td>
+                        <td style="padding: 5px;">${loginTime}</td>
+                    </tr>
+                </table>
+                <p style="margin-top: 20px;">If this was you, you can safely ignore this email.</p>
+                <p style="color: #d9534f;"><strong>If you did not recognize this activity, please change your password immediately and contact support.</strong></p>
+            </div>
+        `;
+        
+        // Send email asynchronously without blocking the response
+        sendHtmlEmail(user.email, 'Security Alert: New Login Detected', htmlContent).catch(err => {
+            logger.error('Failed to send login alert email:', err);
+        });
+    }
 
     res.json({
       success: true,

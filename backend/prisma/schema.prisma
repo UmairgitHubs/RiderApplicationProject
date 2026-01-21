@@ -158,14 +158,18 @@ model Shipment {
   recipient_phone         String
   recipient_email         String?
   pickup_address          String
+  pickup_city             String?            // Added field for origin city
   pickup_latitude         Decimal?           @db.Decimal(10, 8)
   pickup_longitude        Decimal?           @db.Decimal(11, 8)
+  hub_id                  String?            // Added field for Origin Hub
+
   delivery_address        String
   delivery_latitude       Decimal?           @db.Decimal(10, 8)
   delivery_longitude      Decimal?           @db.Decimal(11, 8)
   package_type            String?
   package_weight          Decimal?           @db.Decimal(8, 2)
   package_value           Decimal?           @db.Decimal(10, 2)
+  recipient_city          String?
   special_instructions    String?
   status                  String             @default("pending")
   batch_id                String?
@@ -191,7 +195,10 @@ model Shipment {
   tracking_history        ShipmentTracking[]
   merchant                User               @relation("MerchantShipments", fields: [merchant_id], references: [id])
   rider                   User?              @relation("RiderShipments", fields: [rider_id], references: [id])
+  hub                     Hub?               @relation("ShipmentOriginHub", fields: [hub_id], references: [id])
   route_stops             RouteStop[]
+  
+  @@index([hub_id])
 
   @@index([merchant_id])
   @@index([rider_id])
@@ -355,6 +362,7 @@ model Hub {
   manager    User?    @relation("HubManager", fields: [manager_id], references: [id])
   riders     Rider[]
   routes     Route[]
+  origin_shipments Shipment[] @relation("ShipmentOriginHub")
 
   @@map("hubs")
 }

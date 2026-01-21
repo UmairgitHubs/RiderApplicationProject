@@ -22,6 +22,7 @@ import supportRoutes from './support.routes';
 import chatRoutes from './chat.routes';
 import settingsRoutes from './settings.routes';
 import voiceRoutes from './voice.routes';
+import cmsRoutes from './cms.routes';
 import { maintenanceMiddleware } from '../middleware/maintenance.middleware';
 
 const router = Router();
@@ -37,6 +38,7 @@ router.use('/support', supportRoutes);
 router.use('/chat', chatRoutes);
 router.use('/settings', settingsRoutes);
 router.use('/voice', voiceRoutes);
+router.use('/cms', cmsRoutes);
 
 // More specific admin routes FIRST
 router.use('/admin/analytics', analyticsRoutes);

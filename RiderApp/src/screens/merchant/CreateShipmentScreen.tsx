@@ -32,18 +32,22 @@ export default function CreateShipmentScreen({ navigation, route }: any) {
   
   // If franchise type, render franchise screen
   if (shipmentType === 'franchise') {
-    return <FranchiseShipmentScreen navigation={navigation} route={route} />;
+    const FranchiseScreen = FranchiseShipmentScreen as any;
+    return <FranchiseScreen navigation={navigation} route={route} />;
   }
   
   // If individual type, render individual screen
   if (shipmentType === 'individual') {
-    return <IndividualShipmentScreen navigation={navigation} route={route} />;
+    const IndividualScreen = IndividualShipmentScreen as any;
+    return <IndividualScreen navigation={navigation} route={route} />;
   }
   
   // Otherwise, render default individual shipment form
   const [recipientName, setRecipientName] = useState('');
   const [recipientPhone, setRecipientPhone] = useState('');
+  const [recipientCity, setRecipientCity] = useState('');
   const [pickupAddress, setPickupAddress] = useState('');
+  const [pickupCity, setPickupCity] = useState('');
   const [deliveryAddress, setDeliveryAddress] = useState('');
   const [specialInstructions, setSpecialInstructions] = useState('');
   
@@ -89,7 +93,7 @@ export default function CreateShipmentScreen({ navigation, route }: any) {
 
   const handleCreateShipment = async () => {
     // Validate
-    if (!recipientName || !recipientPhone || !pickupAddress || !deliveryAddress) {
+    if (!recipientName || !recipientPhone || !recipientCity || !pickupAddress || !pickupCity || !deliveryAddress) {
       Alert.alert('Missing Information', 'Please fill in all required fields.');
       return;
     }
@@ -103,7 +107,9 @@ export default function CreateShipmentScreen({ navigation, route }: any) {
       const shipmentData = {
         recipientName,
         recipientPhone,
+        recipientCity,
         pickupAddress,
+        pickupCity,
         deliveryAddress,
         packages: packages.map((pkg) => ({
           packageType: pkg.packageType,
@@ -344,6 +350,17 @@ export default function CreateShipmentScreen({ navigation, route }: any) {
               keyboardType="phone-pad"
             />
           </View>
+          <Text style={styles.label}>City *</Text>
+          <View style={styles.inputContainer}>
+            <Ionicons name="business-outline" size={20} color={colors.textLight} style={styles.inputIcon} />
+            <TextInput
+              style={styles.input}
+              placeholder="New York"
+              placeholderTextColor={colors.textLight}
+              value={recipientCity}
+              onChangeText={setRecipientCity}
+            />
+          </View>
         </View>
 
         {/* Pickup & Delivery Addresses */}
@@ -377,6 +394,18 @@ export default function CreateShipmentScreen({ navigation, route }: any) {
             >
               <Ionicons name="map-outline" size={20} color={colors.success} />
             </TouchableOpacity>
+          </View>
+
+          <Text style={styles.label}>Pickup City *</Text>
+          <View style={styles.inputContainer}>
+            <Ionicons name="business-outline" size={20} color={colors.success} style={styles.inputIcon} />
+            <TextInput
+              style={styles.input}
+              placeholder="New York"
+              placeholderTextColor={colors.textLight}
+              value={pickupCity}
+              onChangeText={setPickupCity}
+            />
           </View>
 
           <Text style={styles.label}>Delivery Address *</Text>

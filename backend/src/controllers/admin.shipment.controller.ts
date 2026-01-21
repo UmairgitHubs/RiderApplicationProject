@@ -79,10 +79,17 @@ export const getAllShipments = asyncHandler(async (req: AuthRequest, res: Respon
             }
           }
         },
+        hub: {
+          select: {
+            id: true,
+            name: true,
+            city: true
+          }
+        },
         packages: {
           select: { id: true }
         }
-      }
+      } as any
     }),
     prisma.shipment.count({ where }),
     prisma.shipment.groupBy({
@@ -138,8 +145,8 @@ export const getAllShipments = asyncHandler(async (req: AuthRequest, res: Respon
     packageWeight: s.package_weight,
     packageType: s.package_type,
     rider: s.rider ? s.rider.full_name : 'Unassigned',
-    hubId: s.rider?.rider?.hub_id || null, 
-    hub: 'Central Hub',
+    hubId: s.hub?.id || s.rider?.rider?.hub_id || null, 
+    hub: s.hub?.name || 'Unassigned',
     pickupAddress: s.pickup_address,
     deliveryAddress: s.delivery_address,
     priority: s.priority || 'Normal',

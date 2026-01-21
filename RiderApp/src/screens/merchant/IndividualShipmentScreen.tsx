@@ -19,6 +19,7 @@ export default function IndividualShipmentScreen({ navigation, route }: any) {
   const insets = useSafeAreaInsets();
   const [receiverName, setReceiverName] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
+  const [receiverCity, setReceiverCity] = useState('');
   const [deliveryAddress, setDeliveryAddress] = useState('');
   const [packageType, setPackageType] = useState('');
   const [showPackageTypeModal, setShowPackageTypeModal] = useState(false);
@@ -30,6 +31,8 @@ export default function IndividualShipmentScreen({ navigation, route }: any) {
   const [specialInstructions, setSpecialInstructions] = useState('');
   const [loading, setLoading] = useState(false);
   const [loadingPickup, setLoadingPickup] = useState(true);
+  const [pickupCity, setPickupCity] = useState('');
+  const [isEditingPickup, setIsEditingPickup] = useState(false);
 
   const packageTypes = [
     'Electronics',
@@ -52,45 +55,63 @@ export default function IndividualShipmentScreen({ navigation, route }: any) {
     fetchPickupAddress();
   }, []);
 
+  const handleEditPickup = () => setIsEditingPickup(true);
+
+  const handleSavePickup = () => {
+      // Basic validation if needed
+      if(!pickupCity.trim()) {
+          Alert.alert("Validation Error", "Pickup City is required");
+          return;
+      }
+      setIsEditingPickup(false);
+  }
+
+  // Effect to ensure we default to "Your Location" label if empty
+  useEffect(() => {
+     if(!pickupAddress.label) setPickupAddress(prev => ({...prev, label: 'Your Location'}));
+  }, []);
+
   const fetchPickupAddress = async () => {
     try {
       setLoadingPickup(true);
       const user = await authApi.getStoredUser();
+      // Alert.alert("User",JSON.stringify(user));
+     
       
       try {
-        const profileResponse = await api.get('/profile');
+        const profileResponse = await api.get('/profile') as any;
         if (profileResponse.success && profileResponse.data) {
           const profile = profileResponse.data;
           
-          try {
-            const addressesResponse = await api.get('/profile/addresses');
-            if (addressesResponse.success && addressesResponse.data?.length > 0) {
-              const defaultAddress = addressesResponse.data.find((addr: any) => addr.isDefault) || addressesResponse.data[0];
-              setPickupAddress({
-                label: 'Your Location',
-                phone: profile.phone || user?.phone || '+1 (555) 123-4567',
-                address: defaultAddress 
-                  ? `${defaultAddress.addressLine1 || ''}${defaultAddress.addressLine2 ? ', ' + defaultAddress.addressLine2 : ''}, ${defaultAddress.city || ''}, ${defaultAddress.state || ''} ${defaultAddress.postalCode || ''}`.trim()
-                  : 'Current registered address',
-              });
-              setLoadingPickup(false);
-              return;
-            }
-          } catch (e) {
-            console.log('Could not fetch addresses, using profile data');
+          setPickupAddress({
+            label: profile.businessName || profile.fullName || 'Your Location',
+            phone: profile.phone || user?.phone || '',
+            address: profile.businessAddress || profile.address || 'Current registered address',
+          });
+
+          // Priority 1: Merchant Profile City (We just added this to backend)
+          if (profile.city) {
+              setPickupCity(profile.city);
+          } 
+          // Priority 2: Try default address if city is still missing
+          else {
+              try {
+                const addressesResponse = await api.get('/profile/addresses') as any;
+                if (addressesResponse.success && addressesResponse.data?.length > 0) {
+                  const defaultAddress = addressesResponse.data.find((addr: any) => addr.isDefault) || addressesResponse.data[0];
+                   if (defaultAddress.city) setPickupCity(defaultAddress.city);
+                }
+              } catch (e) {
+                console.log('Could not fetch addresses');
+              }
           }
-          
-          setPickupAddress({
-            label: 'Your Location',
-            phone: profile.phone || user?.phone || '+1 (555) 123-4567',
-            address: profile.address || 'Current registered address',
-          });
         } else {
-          setPickupAddress({
-            label: 'Your Location',
-            phone: user?.phone || '+1 (555) 123-4567',
-            address: 'Current registered address',
-          });
+             // Fallback
+             setPickupAddress({
+                label:user?.fullName || 'Your Location',
+                phone: user?.phone || '+1 (555) 123-4567',
+                address: 'Current registered address',
+              });
         }
       } catch (error) {
         console.log('Could not fetch profile, using defaults');
@@ -122,6 +143,14 @@ export default function IndividualShipmentScreen({ navigation, route }: any) {
       Alert.alert('Validation Error', 'Please enter phone number.');
       return;
     }
+    if (!pickupCity.trim()) {
+      Alert.alert('Validation Error', 'Please enter pickup city.');
+      return;
+    }
+    if (!receiverCity.trim()) {
+      Alert.alert('Validation Error', 'Please enter city.');
+      return;
+    }
     if (!deliveryAddress.trim()) {
       Alert.alert('Validation Error', 'Please enter delivery address.');
       return;
@@ -146,8 +175,10 @@ export default function IndividualShipmentScreen({ navigation, route }: any) {
       const shipmentData = {
         recipientName: receiverName,
         recipientPhone: phoneNumber,
+        recipientCity: receiverCity,
         pickupAddress: pickupAddress.address,
         pickupPhone: pickupAddress.phone,
+        pickupCity: pickupCity,
         deliveryAddress: deliveryAddress,
         packages: [{
           packageType: packageType,
@@ -162,7 +193,7 @@ export default function IndividualShipmentScreen({ navigation, route }: any) {
 
       console.log('Creating individual shipment:', shipmentData);
 
-      const response = await shipmentApi.create(shipmentData);
+      const response = await shipmentApi.create(shipmentData) as any;
 
       if (response.success) {
         // Navigate to success screen with tracking number
@@ -211,16 +242,94 @@ export default function IndividualShipmentScreen({ navigation, route }: any) {
       >
         {/* PICKUP ADDRESS */}
         <View style={styles.section}>
-          <Text style={styles.sectionLabel}>PICKUP ADDRESS</Text>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionLabel}>PICKUP ADDRESS</Text>
+            {!loadingPickup && !isEditingPickup && (
+              <TouchableOpacity onPress={handleEditPickup} style={styles.editButton}>
+                <Ionicons name="create-outline" size={18} color={colors.success} />
+                <Text style={styles.editButtonText}>Edit</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+          
           {loadingPickup ? (
             <View style={styles.pickupCard}>
               <ActivityIndicator size="small" color={colors.success} />
             </View>
+          ) : isEditingPickup ? (
+            <View style={styles.pickupCard}>
+               {/* Label */}
+               <View style={[styles.fieldContainer, { marginBottom: 12 }]}>
+                    <Text style={styles.fieldLabel}>Location Label</Text>
+                    <TextInput
+                        style={styles.pickupInput}
+                        value={pickupAddress.label}
+                        onChangeText={(t) => setPickupAddress({...pickupAddress, label: t})}
+                        placeholder="e.g. Office, Home"
+                        placeholderTextColor={colors.textLight}
+                    />
+               </View>
+
+               {/* Phone */}
+               <View style={[styles.fieldContainer, { marginBottom: 12 }]}>
+                    <Text style={styles.fieldLabel}>Phone</Text>
+                    <TextInput
+                        style={styles.pickupInput}
+                        value={pickupAddress.phone}
+                        onChangeText={(t) => setPickupAddress({...pickupAddress, phone: t})}
+                        keyboardType="phone-pad"
+                        placeholderTextColor={colors.textLight}
+                    />
+               </View>
+
+               {/* City */}
+               <View style={[styles.fieldContainer, { marginBottom: 12 }]}>
+                    <Text style={styles.fieldLabel}>Pickup City <Text style={styles.requiredIndicator}>*</Text></Text>
+                    <TextInput
+                        style={styles.pickupInput}
+                        value={pickupCity}
+                        onChangeText={setPickupCity}
+                        placeholder="Required for routing"
+                        placeholderTextColor={colors.textLight}
+                    />
+               </View>
+
+               {/* Address */}
+               <View style={styles.fieldContainer}>
+                    <Text style={styles.fieldLabel}>Address</Text>
+                    <TextInput
+                        style={[styles.pickupInput, { minHeight: 60, textAlignVertical: 'top' }]}
+                        value={pickupAddress.address}
+                        onChangeText={(t) => setPickupAddress({...pickupAddress, address: t})}
+                        multiline
+                        placeholderTextColor={colors.textLight}
+                    />
+               </View>
+
+               {/* Actions */}
+               <View style={styles.pickupActions}>
+                   <TouchableOpacity 
+                    style={styles.saveButton} 
+                    onPress={handleSavePickup}
+                   >
+                       <Text style={styles.saveButtonText}>Save & Update</Text>
+                   </TouchableOpacity>
+               </View>
+            </View>
           ) : (
             <View style={styles.pickupCard}>
-              <Text style={styles.pickupLabel}>{pickupAddress.label}</Text>
+              <Text style={styles.pickupLabel}>{pickupAddress.label || 'Your Location'}</Text>
               <Text style={styles.pickupPhone}>{pickupAddress.phone}</Text>
               <Text style={styles.pickupAddress}>{pickupAddress.address}</Text>
+              {pickupCity ? (
+                  <Text style={[styles.pickupAddress, { marginTop: 4, fontStyle: 'italic', opacity: 0.8 }]}>
+                      City: {pickupCity}
+                  </Text>
+              ) : (
+                  <Text style={[styles.pickupAddress, { marginTop: 4, color: colors.error }]}>
+                      City missing - Click Edit to add
+                  </Text>
+              )}
             </View>
           )}
         </View>
@@ -258,6 +367,22 @@ export default function IndividualShipmentScreen({ navigation, route }: any) {
                 value={phoneNumber}
                 onChangeText={setPhoneNumber}
                 keyboardType="phone-pad"
+              />
+            </View>
+          </View>
+
+          <View style={styles.fieldContainer}>
+            <Text style={styles.fieldLabel}>
+              City <Text style={styles.requiredIndicator}>*</Text>
+            </Text>
+            <View style={styles.inputContainer}>
+              <Ionicons name="business-outline" size={20} color={colors.textLight} style={styles.inputIcon} />
+              <TextInput
+                style={styles.input}
+                placeholder="Enter city"
+                placeholderTextColor={colors.textLight}
+                value={receiverCity}
+                onChangeText={setReceiverCity}
               />
             </View>
           </View>
@@ -632,6 +757,47 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.base,
     color: colors.success,
     fontWeight: typography.fontWeight.medium,
+  },
+  sectionHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: spacing.md,
+  },
+  editButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.xs,
+  },
+  editButtonText: {
+      fontSize: typography.fontSize.sm,
+      color: colors.success,
+      fontWeight: typography.fontWeight.medium,
+  },
+  pickupInput: {
+      backgroundColor: colors.backgroundInput,
+      borderRadius: borderRadius.md,
+      padding: spacing.md,
+      fontSize: typography.fontSize.base,
+      color: colors.text,
+      borderWidth: 1,
+      borderColor: colors.border,
+  },
+  pickupActions: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      marginTop: spacing.md,
+  },
+  saveButton: {
+      backgroundColor: colors.success,
+      paddingVertical: spacing.sm,
+      paddingHorizontal: spacing.lg,
+      borderRadius: borderRadius.md,
+  },
+  saveButtonText: {
+      color: colors.textWhite,
+      fontWeight: typography.fontWeight.medium,
+      fontSize: typography.fontSize.base,
   },
 });
 

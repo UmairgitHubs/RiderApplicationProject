@@ -54,6 +54,7 @@ export const getProfile = async (req: Request, res: Response) => {
       profile.businessName = user.merchant.business_name;
       profile.businessType = user.merchant.business_type;
       profile.businessAddress = user.merchant.address;
+      profile.city = user.merchant.city;
       profile.address = user.merchant.address; // For backwards compatibility
       profile.walletBalance = user.merchant.wallet_balance;
       profile.totalSpent = user.merchant.total_spent;

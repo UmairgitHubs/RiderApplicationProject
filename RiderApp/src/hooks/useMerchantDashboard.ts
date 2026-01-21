@@ -48,7 +48,7 @@ export const useMerchantDashboard = () => {
   } = useQuery({
     queryKey: ['merchant-recent-shipments'],
     queryFn: async () => {
-      const response = await shipmentApi.getAll({ limit: 10 });
+      const response = await shipmentApi.getAll({ limit: 100 });
       return (response as any).data?.shipments || [];
     },
     initialData: []
@@ -79,7 +79,7 @@ export const useMerchantDashboard = () => {
       if (!acc[batchId]) {
         acc[batchId] = {
           id: batchId,
-          status: 'active', // Derived from first item
+          status: curr.status || 'pending', // Take status from first found shipment
           pieces: 0,
           destinations: []
         };
@@ -88,24 +88,29 @@ export const useMerchantDashboard = () => {
       acc[batchId].destinations.push({
         id: acc[batchId].pieces,
         name: curr.recipientName || curr.recipient_name,
-        location: curr.deliveryAddress || curr.delivery_address,
+        location: curr.deliveryAddress || curr.delivery_address || 'No Address',
         tracking: curr.trackingNumber || curr.tracking_number
       });
     }
     return acc;
   }, {});
 
-  // Get the most recent/active franchise order
-  const activeBulkOrder = Object.values(franchiseOrders)[0] || null;
+  // Get ALL franchise orders, not just the first one
+  const activeBulkOrders = Object.values(franchiseOrders);
 
+  // Filter for Individual Shipments (excluding Franchise items)
   const recentShipments = shipmentsData
-    .filter((s: any) => s.id !== activeShipment?.id && !(s.batchId || s.batch_id)) // Exclude batch items from individual list
-    .slice(0, 3);
+    .filter((s: any) => {
+      const isFranchise = s.batchId || s.batch_id;
+      const isActiveTracking = activeShipment && s.id === activeShipment.id;
+      return !isFranchise && !isActiveTracking;
+    })
+    .slice(0, 5);
 
   return {
     stats: stats as DashboardStats,
     activeShipment: activeShipment as Shipment | null,
-    activeBulkOrder: activeBulkOrder as any,
+    activeBulkOrders: activeBulkOrders as any[],
     recentShipments: recentShipments as Shipment[],
     loading: statsLoading || shipmentsLoading,
     refreshing: statsRefetching || shipmentsRefetching,

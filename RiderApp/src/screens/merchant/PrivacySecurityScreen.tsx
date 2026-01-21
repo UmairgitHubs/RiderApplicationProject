@@ -84,7 +84,7 @@ export default function PrivacySecurityScreen() {
 
     try {
       setUpdatingPassword(true);
-      const response = await profileApi.changePassword(currentPassword, newPassword);
+      const response: any = await profileApi.changePassword(currentPassword, newPassword);
       
       if (response.success) {
         Alert.alert('Success', 'Password updated successfully', [
@@ -231,7 +231,8 @@ export default function PrivacySecurityScreen() {
   return (
     <View style={styles.container}>
       {/* Orange Header */}
-      <View style={styles.header}>
+      {/* Orange Header */}
+      <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
         <TouchableOpacity 
           style={styles.backButton}
           onPress={() => {

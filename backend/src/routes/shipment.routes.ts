@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import multer from 'multer';
 import {
   createShipment,
   getMerchantShipments,
@@ -16,7 +17,8 @@ const router = Router();
 // All routes require authentication
 router.use(authenticate);
 
-router.post('/', validateCreateShipment, createShipment);
+const upload = multer({ storage: multer.memoryStorage() });
+router.post('/', upload.single('excelFile'), validateCreateShipment, createShipment);
 router.get('/stats', getShipmentStats);
 router.get('/', getMerchantShipments);
 router.get('/:id', getShipmentDetails);

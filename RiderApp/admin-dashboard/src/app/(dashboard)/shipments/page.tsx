@@ -246,7 +246,7 @@ export default function ShipmentsPage() {
     merchant: { name: s.merchantName || 'Unknown', code: 'MER-...' },
     customer: { name: s.recipientName, address: s.deliveryAddress },
     rider: s.rider || 'Unassigned',
-    hub: 'Central Hub',
+    hub: s.hub || 'Unassigned',
     status: s.status,
     codAmount: Number(s.amount || s.codAmount || 0),
     codStatus: s.paymentStatus || 'Pending',

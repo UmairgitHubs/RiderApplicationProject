@@ -203,8 +203,7 @@ export default function ProfileScreen() {
     );
   }
 
-  const businessName =
-    profile?.businessName || profile?.fullName || "Tech Store NYC";
+  const businessName = profile?.fullName || "Tech Store NYC";
   const merchantId = getMerchantId(profile?.id);
   const phone = formatPhone(profile?.phone);
   const email = profile?.email || "contact@techstore.com";
@@ -213,7 +212,7 @@ export default function ProfileScreen() {
   return (
     <View style={styles.container}>
       {/* Orange Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
         <Text style={styles.headerTitle}>Account</Text>
         <Text style={styles.headerSubtitle}>
           Manage your profile & settings
@@ -526,12 +525,10 @@ const styles = StyleSheet.create({
   },
   header: {
     backgroundColor: colors.primary,
-    paddingTop: Platform.OS === "ios" ? 50 : 30,
     paddingBottom: 40,
     paddingHorizontal: spacing.lg,
     borderBottomLeftRadius: 30,
     borderBottomRightRadius: 30,
-    minHeight: 160,
   },
   headerTitle: {
     fontSize: typography.fontSize["3xl"],

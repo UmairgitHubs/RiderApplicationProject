@@ -2,6 +2,7 @@ import firebaseAdmin from 'firebase-admin';
 import nodemailer from 'nodemailer';
 import twilio from 'twilio';
 import prisma from '../config/database';
+import { config } from '../config/env';
 import { logger } from '../utils/logger';
 
 // Firebase initialization
@@ -28,13 +29,14 @@ export const initFirebase = () => {
 };
 
 // Email transporter configuration
+// Email transporter configuration
 const emailTransporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: parseInt(process.env.SMTP_PORT || '587', 10),
-  secure: false,
+  host: config.email.host,
+  port: config.email.port,
+  secure: config.email.port === 465,
   auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
+    user: config.email.user,
+    pass: config.email.password,
   },
 });
 
@@ -202,13 +204,13 @@ export class NotificationService {
     payload: NotificationPayload
   ): Promise<void> {
     try {
-      if (!process.env.SMTP_USER) {
+      if (!config.email.user) {
         logger.warn('Email not configured - skipping email notification');
         return;
       }
 
       const mailOptions = {
-        from: process.env.SMTP_FROM || 'noreply@zimli.com',
+        from: `"COD Express" <${config.email.from}>`,
         to: email,
         subject: payload.title,
         html: this.getEmailTemplate(payload),

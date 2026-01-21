@@ -105,6 +105,12 @@ class ApiClient {
       ...(options.headers as Record<string, string>),
     };
 
+    // Remove Content-Type if it is 'multipart/form-data' (signal to let browser handle boundary)
+    // or if it is null/undefined (though strict mode might complain about null)
+    if (headers["Content-Type"] === 'multipart/form-data' || headers["Content-Type"] === null) {
+        delete headers["Content-Type"];
+    }
+
     if (token) {
       headers["Authorization"] = `Bearer ${token}`;
     }
@@ -118,10 +124,10 @@ class ApiClient {
       const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout (increased for Android)
 
       console.log("🌐 Making request to:", url);
-      console.log("📋 Request options:", {
-        method: options.method || "GET",
-        headers,
-      });
+      // console.log("📋 Request options:", {
+      //   method: options.method || "GET",
+      //   headers,
+      // });
 
       const response = await fetch(url, {
         ...options,
@@ -179,6 +185,16 @@ class ApiClient {
     });
   }
 
+  async upload<T>(endpoint: string, data: any): Promise<T> {
+    return this.request<T>(endpoint, {
+      method: "POST",
+      body: data,
+      headers: {
+        "Content-Type": "multipart/form-data"
+      }
+    });
+  }
+
   async put<T>(endpoint: string, data: any): Promise<T> {
     return this.request<T>(endpoint, {
       method: "PUT",
@@ -203,29 +219,10 @@ export const api = new ApiClient(API_BASE_URL);
 
 // Shipment API
 export const shipmentApi = {
-  create: async (data: {
-    recipientName: string;
-    recipientPhone: string;
-    recipientEmail?: string;
-    pickupAddress: string;
-    pickupLatitude?: number;
-    pickupLongitude?: number;
-    deliveryAddress: string;
-    deliveryLatitude?: number;
-    deliveryLongitude?: number;
-    packages: Array<{
-      packageType: string;
-      packageWeight?: string;
-      packageValue?: string;
-      packageSize: string;
-      description?: string;
-    }>;
-    specialInstructions?: string;
-    scheduledPickupTime?: string;
-    scheduledDeliveryTime?: string;
-    codAmount?: number;
-    paymentMethod?: string;
-  }) => {
+  create: async (data: any) => {
+    if (data instanceof FormData) {
+      return api.upload("/shipments", data);
+    }
     return api.post("/shipments", data);
   },
 
@@ -641,6 +638,18 @@ export const settingsApi = {
   getSystemInfo: async () => {
     return api.get<ApiResponse>("/settings/info");
   },
+};
+
+// CMS API
+export const cmsApi = {
+  getCMSContent: async (params: { type: string; search?: string }) => {
+    const queryString = new URLSearchParams(params as any).toString();
+    return api.get<ApiResponse>(`/cms?${queryString}`);
+  },
+  
+  getFAQs: async () => {
+    return api.get<ApiResponse>("/cms?type=FAQs");
+  }
 };
 
 export default api;

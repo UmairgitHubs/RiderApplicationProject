@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import prisma from '../config/database';
 import { logger } from '../utils/logger';
+import * as xlsx from 'xlsx';
 import QRCode from 'qrcode';
 import { v4 as uuidv4 } from 'uuid';
 import { settingsService } from '../services/settings.service';
@@ -31,7 +32,9 @@ export const createShipment = async (req: Request, res: Response) => {
       recipientName,
       recipientPhone,
       recipientEmail,
+      recipientCity,
       pickupAddress,
+      pickupCity,
       pickupLatitude,
       pickupLongitude,
       deliveryAddress,
@@ -51,10 +54,47 @@ export const createShipment = async (req: Request, res: Response) => {
 
     const trackingNumber = generateTrackingNumber();
 
+    // Find Origin Hub
+    let originHubId = null;
+    if (pickupCity) {
+      const normalizedCity = pickupCity.trim();
+      // Try exact or case-insensitive match
+      let hub = await prisma.hub.findFirst({
+        where: {
+          city: { equals: normalizedCity, mode: 'insensitive' }
+        }
+      });
+      
+      // Fallback: Try contains (e.g. 'West End' finding 'Hub West End' if city is stored weirdly or vice versa)
+      if (!hub) {
+         hub = await prisma.hub.findFirst({
+            where: {
+               city: { contains: normalizedCity, mode: 'insensitive'}
+            }
+         });
+      }
+
+      if (hub) {
+        originHubId = hub.id;
+      }
+    }
+
     // Generate Batch ID if franchise
     const batchId = shipmentType === 'franchise' ? `FR${new Date().getFullYear()}${Math.floor(Math.random() * 1000000)}` : null;
 
     let packagesArray = packages || [];
+    if (typeof packagesArray === 'string') {
+      try {
+        packagesArray = JSON.parse(packagesArray);
+      } catch (e) {
+        packagesArray = [];
+      }
+    }
+    
+    // ... (existing package logic omitted for brevity, keeping it intact in replacement if needed, 
+    // but typically ReplaceFileContent replaces the whole block.
+    // I need to be careful not to delete logic I'm not showing.
+    // I will target the block from destructuring to shipment creation.)
     
     if (!packagesArray.length && (packageType || packageWeight || packageValue)) {
       packagesArray = [{
@@ -138,7 +178,10 @@ export const createShipment = async (req: Request, res: Response) => {
         recipient_name: recipientName,
         recipient_phone: recipientPhone,
         recipient_email: recipientEmail || null,
+        recipient_city: recipientCity || null,
         pickup_address: pickupAddress,
+        pickup_city: pickupCity || null,
+        hub_id: originHubId,
         pickup_latitude: pickupLatitude ? parseFloat(pickupLatitude) : null,
         pickup_longitude: pickupLongitude ? parseFloat(pickupLongitude) : null,
         delivery_address: deliveryAddress,
@@ -162,30 +205,98 @@ export const createShipment = async (req: Request, res: Response) => {
       } as any,
     });
 
-    // SIMULATION: If Franchise, create 2 more dummy shipments to simulate bulk import
-    if (shipmentType === 'franchise' && batchId) {
-      const dummyRecipients = [
-        { name: 'Michael Chen', loc: 'Queens, NY 11054' },
-        { name: 'Emily Rodriguez', loc: 'Manhattan, NY 10003' }
-      ];
-      
-      for (const recipient of dummyRecipients) {
-        const dummyTracking = generateTrackingNumber();
-        await prisma.shipment.create({
-          data: {
-            tracking_number: dummyTracking,
-            merchant_id: userId,
-            recipient_name: recipient.name,
-            recipient_phone: recipientPhone, // Reuse phone
-            pickup_address: pickupAddress,
-            delivery_address: recipient.loc,
-            package_type: packagesArray[0]?.packageType || null,
-            delivery_fee: deliveryFee,
-            status: 'in_transit', // Simulate active movement
-            batch_id: batchId,
-            shipment_type: 'franchise'
-          } as any
-        });
+    // Handle Excel File for Franchise Orders
+    if (shipmentType === 'franchise' && batchId && req.file) {
+      try {
+        const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+        const data: any[] = xlsx.utils.sheet_to_json(sheet);
+
+        console.log(`Processing ${data.length} rows from Excel upload for batch ${batchId}`);
+
+        for (const row of data) {
+          // Map Excel columns to variables - flexible mapping
+          const rowName = row['Name'] || row['Receiver Name'] || row['Recipient'] || 'Unknown Recipient';
+          const rowPhone = row['Phone'] || row['Mobile'] || row['Contact'] || recipientPhone; 
+          const rowAddress = row['Address'] || row['Location'] || row['Delivery Address'] || 'Unknown Address';
+          const rowCity = row['City'] || row['Town'] || row['District'] || recipientCity || null;
+          const rowType = row['Type'] || row['Package Type'] || packagesArray[0]?.packageType || 'Standard';
+          const rowWeight = row['Weight'] || row['kg'] || totalWeight || 1;
+          const rowCOD = row['COD'] || row['Amount'] || codAmount || 0;
+          const rowInstructions = row['Instructions'] || row['Notes'] || specialInstructions || null;
+
+          const rowTracking = generateTrackingNumber();
+
+          // Create shipment for each row
+          const rowShipment = await prisma.shipment.create({
+             data: {
+              tracking_number: rowTracking,
+              merchant_id: userId,
+              recipient_name: rowName,
+              recipient_phone: rowPhone, 
+              recipient_city: rowCity,
+              pickup_address: pickupAddress,
+              pickup_city: pickupCity || null,
+              hub_id: originHubId,
+              delivery_address: rowAddress,
+              package_type: rowType,
+              package_weight: parseFloat(rowWeight.toString()) || 1,
+              delivery_fee: deliveryFee,
+              status: initialStatus, // Use same status as main (assigned if rider active) or pending
+              batch_id: batchId,
+              shipment_type: 'franchise',
+              cod_amount: parseFloat(rowCOD.toString()) || 0,
+              special_instructions: rowInstructions,
+              payment_method: paymentMethod || 'wallet',
+              payment_status: 'pending',
+              merchant_note: 'Imported via Bulk Upload'
+            } as any
+          });
+
+          // Create package record for this shipment
+           const pkgRecord = await prisma.package.create({
+            data: {
+              shipment_id: rowShipment.id,
+              weight: parseFloat(rowWeight.toString()) || 1,
+              dimensions: 'standard',
+              type: rowType,
+              fragile: false
+            } as any
+          });
+
+          // Generate barcode/QR for this package
+           const barcodeNumber = generateBarcodeNumber(rowTracking, 1);
+           const qrData = JSON.stringify({
+             barcodeNumber,
+             trackingNumber: rowTracking,
+             shipmentId: rowShipment.id,
+             packageNumber: 1,
+             packageId: `${rowShipment.id}-PKG1`
+           });
+           
+           try {
+             const qrCodeUrl = await QRCode.toDataURL(qrData);
+             await prisma.package.update({
+               where: { id: pkgRecord.id },
+               data: {
+                 barcode_number: barcodeNumber,
+                 qr_code_url: qrCodeUrl
+               }
+             });
+           } catch (e) { console.error('QR Gen Error', e); }
+          
+          // Initial History
+          await prisma.shipmentTracking.create({
+            data: {
+               shipment_id: rowShipment.id,
+               status: 'pending',
+               location_address: 'Merchant Location'
+            } as any
+          });
+        }
+      } catch (err) {
+        console.error("Error parsing Excel file:", err);
       }
     }
 
@@ -250,6 +361,13 @@ export const createShipment = async (req: Request, res: Response) => {
         reference_type: 'shipment',
       },
     });
+
+    // Send external notification (Email/SMS) based on user preferences
+    sendOrderUpdateNotification(
+      userId,
+      trackingNumber,
+      'created successfully'
+    ).catch((error) => logger.error('Error sending shipment creation notification:', error));
 
     res.status(201).json({
       success: true,
@@ -381,6 +499,9 @@ export const getMerchantShipments = async (req: Request, res: Response) => {
           createdAt: s.created_at,
           packageCount: s.packages.length,
           rider: s.rider,
+          // Franchise/Bulk Support
+          batchId: s.batch_id,
+          shipmentType: s.shipment_type,
         })),
         pagination: {
           page: parseInt(page as string),

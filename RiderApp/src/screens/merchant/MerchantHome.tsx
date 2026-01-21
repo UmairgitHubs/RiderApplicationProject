@@ -23,17 +23,7 @@ import { useMerchantDashboard } from '../../hooks/useMerchantDashboard';
 const FRANCHISE_PURPLE = '#7C4DFF';
 const FRANCHISE_BG = '#F3E5F5';
 
-// Mock Data for Decoration (matches user request)
-const MOCK_BULK_ORDER = {
-  id: 'FR2024090176543',
-  status: 'active',
-  pieces: 6,
-  destinations: [
-    { id: 1, name: 'Sarah Williams', location: 'Brooklyn, NY 11201', tracking: 'CE2024-FR-001' },
-    { id: 2, name: 'Michael Chen', location: 'Queens, NY 11054', tracking: 'CE2024-FR-002' },
-    { id: 3, name: 'Emily Rodriguez', location: 'Manhattan, NY 10003', tracking: 'CE2024-FR-003' },
-  ]
-};
+// Mock Data removed - using real data from useMerchantDashboard hook
 
 const getStatusInfo = (status: string) => {
   const statusMap: { [key: string]: { label: string; color: string } } = {
@@ -57,7 +47,7 @@ export default function MerchantHome() {
   const { 
     stats, 
     activeShipment, 
-    activeBulkOrder, // Now available
+    activeBulkOrders, // Now available as array
     recentShipments, 
     loading, 
     refreshing, 
@@ -116,23 +106,26 @@ export default function MerchantHome() {
             <Text style={styles.headerTitle}>{t('home.dashboard')}</Text>
             <Text style={styles.headerSubtitle}>{t('home.welcomeBack')}</Text>
           </View>
-          <TouchableOpacity onPress={() => {
-            const parent = navigation.getParent();
-            if (parent) parent.navigate('Notifications');
-          }}>
+          <TouchableOpacity 
+            style={styles.notificationButton}
+            onPress={() => {
+              const parent = navigation.getParent();
+              if (parent) parent.navigate('Notifications');
+            }}
+          >
             <Ionicons name="notifications-outline" size={24} color={colors.textWhite} />
           </TouchableOpacity>
         </View>
 
-        {/* Stats Cards */}
+        {/* Stats Cards - Fixed Width Layout to match design */}
         <View style={styles.statsContainer}>
           <View style={styles.statCard}>
-            <Text style={styles.statNumber}>{stats.active}</Text>
-            <Text style={styles.statLabel}>{t('home.active')}</Text>
+             <Text style={styles.statLabel}>{t('home.active')}</Text>
+             <Text style={styles.statNumber}>{stats.active}</Text>
           </View>
           <View style={styles.statCard}>
-            <Text style={styles.statNumber}>{stats.delivered}</Text>
-            <Text style={styles.statLabel}>{t('home.delivered')}</Text>
+             <Text style={styles.statLabel}>{t('home.delivered')}</Text>
+             <Text style={styles.statNumber}>{stats.delivered}</Text>
           </View>
         </View>
       </View>
@@ -151,8 +144,8 @@ export default function MerchantHome() {
             <Ionicons name="add" size={32} color={colors.textWhite} />
           </View>
           <View style={styles.createShipmentText}>
-            <Text style={styles.createShipmentTitle}>{t('home.createShipment')}</Text>
-            <Text style={styles.createShipmentSubtitle}>{t('home.createShipmentDesc')}</Text>
+            <Text style={styles.createShipmentTitle}>Create New Shipment</Text>
+            <Text style={styles.createShipmentSubtitle}>Book a new delivery</Text>
           </View>
         </TouchableOpacity>
 
@@ -254,13 +247,15 @@ export default function MerchantHome() {
           </View>
         )}
 
-        {/* Franchise Bulk Order Card (REAL DATA) */}
-        {activeBulkOrder && (
-        <View style={styles.section}>
+        {/* Franchise Bulk Order Card (REAL DATA) - NOW LISTS ALL */}
+        {activeBulkOrders && activeBulkOrders.length > 0 && activeBulkOrders.map((bulkOrder: any, index: number) => (
+        <View key={bulkOrder.id} style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Franchise Bulk Order</Text>
+            <Text style={styles.sectionTitle}>
+              {index === 0 ? 'Latest Franchise Order' : 'Previous Franchise Order'}
+            </Text>
             <View style={[styles.badge, { backgroundColor: '#E1BEE7' }]}>
-               <Text style={[styles.badgeText, { color: FRANCHISE_PURPLE }]}>Active</Text>
+               <Text style={[styles.badgeText, { color: FRANCHISE_PURPLE }]}>{getStatusInfo(bulkOrder.status).label}</Text>
             </View>
           </View>
 
@@ -280,20 +275,22 @@ export default function MerchantHome() {
             <View style={styles.bulkIdContainer}>
               <View>
                 <Text style={styles.bulkLabel}>Franchise Order ID</Text>
-                <Text style={styles.bulkValue}>{activeBulkOrder.id}</Text>
+                <Text style={styles.bulkValue}>{bulkOrder.id}</Text>
               </View>
-              <View style={styles.outForDeliveryBadge}>
-                <Text style={styles.outForDeliveryText}>Out for Delivery</Text>
+              <View style={[styles.outForDeliveryBadge, { backgroundColor: getStatusInfo(bulkOrder.status || 'pending').color + '20' }]}>
+                <Text style={[styles.outForDeliveryText, { color: getStatusInfo(bulkOrder.status || 'pending').color }]}>
+                  {getStatusInfo(bulkOrder.status || 'pending').label}
+                </Text>
               </View>
             </View>
 
-            <Text style={styles.piecesText}>{activeBulkOrder.pieces} pieces • {activeBulkOrder.pieces} different customers</Text>
+            <Text style={styles.piecesText}>{bulkOrder.pieces} pieces • {bulkOrder.pieces} different customers</Text>
 
             {/* Destinations List */}
             <View style={styles.destinationsContainer}>
-              <Text style={styles.destinationsTitle}>Delivery Destinations (All Trackable):</Text>
-              {activeBulkOrder.destinations.map((dest: any) => (
-                <View key={dest.id} style={styles.destinationRow}>
+              <Text style={styles.destinationsTitle}>Delivery Destinations:</Text>
+              {bulkOrder.destinations.slice(0, 5).map((dest: any) => (
+                <View key={`${bulkOrder.id}-${dest.id}`} style={styles.destinationRow}>
                   <View style={styles.destNumberContainer}>
                     <Text style={styles.destNumber}>{dest.id}</Text>
                   </View>
@@ -305,46 +302,69 @@ export default function MerchantHome() {
                   <Ionicons name="paper-plane-outline" size={16} color={FRANCHISE_PURPLE} />
                 </View>
               ))}
+              {bulkOrder.destinations.length > 5 && (
+                  <Text style={{textAlign: 'center', color: colors.textLight, marginTop: 8, fontSize: 12}}>
+                      + {bulkOrder.destinations.length - 5} more destinations
+                  </Text>
+              )}
             </View>
 
-            {/* Delivery Flow */}
-            <View style={styles.flowContainer}>
-              <Text style={styles.flowTitle}>Delivery Flow:</Text>
-              
-              <View style={styles.flowStep}>
-                <Ionicons name="checkmark-circle" size={20} color={colors.success} />
-                <Text style={styles.flowText}>Merchant → Pickup Rider → Hub</Text>
-              </View>
-              
-              <View style={styles.flowConnector}>
-                 <View style={styles.dottedLine} />
-                 <Text style={styles.flowConnectorText}>Sorted & assigned at hub</Text>
-              </View>
+            {/* Delivery Flow (Only show for the first/newest one to save spacing) */}
+            {index === 0 && (
+                <View style={styles.flowContainer}>
+                <Text style={styles.flowTitle}>Delivery Flow:</Text>
+                
+                <View style={styles.flowStep}>
+                    <Ionicons name="checkmark-circle" size={20} color={colors.success} />
+                    <Text style={styles.flowText}>Merchant → Pickup Rider → Hub</Text>
+                </View>
+                
+                <View style={styles.flowConnector}>
+                    <View style={styles.dottedLine} />
+                    <Text style={styles.flowConnectorText}>Sorted & assigned at hub</Text>
+                </View>
 
-              <View style={styles.flowStep}>
-                <Ionicons name="radio-button-on" size={20} color="#FF9800" />
-                <Text style={[styles.flowText, { color: '#FF9800' }]}>Hub → Delivery Riders → Customers</Text>
-              </View>
-            </View>
+                <View style={styles.flowStep}>
+                    <Ionicons name="radio-button-on" size={20} color="#FF9800" />
+                    <Text style={[styles.flowText, { color: '#FF9800' }]}>Hub → Delivery Riders → Customers</Text>
+                </View>
+                </View>
+            )}
 
-            {/* Info Box */}
-            <View style={styles.infoBox}>
-              <Text style={styles.infoTitle}>📦 Franchise Delivery Info:</Text>
-              <Text style={styles.infoText}>• Each piece goes to a different customer</Text>
-              <Text style={styles.infoText}>• All {activeBulkOrder.pieces} pieces have unique tracking numbers</Text>
-              <Text style={styles.infoText}>• All pieces routed through Hub</Text>
-              <Text style={styles.infoText}>• Separate delivery riders per area</Text>
-            </View>
+            {/* Info Box (Only show for first one) */}
+            {index === 0 && (
+                <View style={styles.infoBox}>
+                <Text style={styles.infoTitle}>📦 Franchise Delivery Info:</Text>
+                <Text style={styles.infoText}>• Each piece goes to a different customer</Text>
+                <Text style={styles.infoText}>• All {bulkOrder.pieces} pieces have unique tracking numbers</Text>
+                </View>
+            )}
 
             {/* Track All Button */}
-            <TouchableOpacity style={styles.bulkTrackButton} onPress={() => {}}>
+            {/* Track All Button */}
+            <TouchableOpacity 
+              style={styles.bulkTrackButton} 
+              onPress={() => {
+                const parent = navigation.getParent();
+                if (parent) {
+                    parent.navigate('FranchiseOrderDetails', { 
+                        shipment: {
+                            trackingNumber: bulkOrder.id,
+                            packageCount: bulkOrder.pieces,
+                            status: bulkOrder.status,
+                            createdAt: new Date().toISOString() // Fallback
+                        }
+                    });
+                }
+              }}
+            >
                <Ionicons name="git-branch-outline" size={20} color={colors.textWhite} />
-               <Text style={styles.bulkTrackButtonText}>Track All {activeBulkOrder.pieces} Orders</Text>
+               <Text style={styles.bulkTrackButtonText}>Track All {bulkOrder.pieces} Orders</Text>
             </TouchableOpacity>
 
           </View>
         </View>
-        )}
+        ))}
 
       </ScrollView>
 
@@ -434,39 +454,47 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   headerTitle: {
-    fontSize: typography.fontSize['3xl'], // Increased size
-    fontWeight: typography.fontWeight.bold,
+    fontSize: 28,
+    fontWeight: '400',
     color: colors.textWhite,
-    marginBottom: spacing.xs,
+    marginBottom: 4,
   },
   headerSubtitle: {
-    fontSize: typography.fontSize.base,
-    color: colors.textWhite,
-    opacity: 0.9,
+    fontSize: 16,
+    color: 'rgba(255,255,255,0.8)',
+    fontWeight: '400',
+  },
+  notificationButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.2)', // Glass effect
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   statsContainer: {
     flexDirection: 'row',
-    gap: spacing.md,
+    gap: 12, // Distinct gap
+    marginTop: 20,
+    marginBottom: 10,
   },
   statCard: {
-    flex: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.25)', // Slightly more visible
-    borderRadius: borderRadius.lg,
-    padding: spacing.md,
-    alignItems: 'flex-start', // Left aligned like screenshot
-    height: 100,
+    flex: 1, // Share width equal
+    height: 100, // Fixed height per design
+    backgroundColor: 'rgba(255, 255, 255, 0.2)', // Glass effect
+    borderRadius: 16,
+    padding: 16,
     justifyContent: 'space-between',
   },
   statNumber: {
-    fontSize: typography.fontSize['4xl'],
-    fontWeight: typography.fontWeight.bold,
+    fontSize: 32,
+    fontWeight: 'bold',
     color: colors.textWhite,
   },
   statLabel: {
-    fontSize: typography.fontSize.sm,
-    color: colors.textWhite,
-    opacity: 0.9,
-    fontWeight: typography.fontWeight.medium,
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.9)',
+    fontWeight: '400',
   },
   scrollView: {
     flex: 1,
@@ -810,46 +838,53 @@ const styles = StyleSheet.create({
   },
   destinationRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F8F4FF', // Very light purple
-    padding: spacing.md,
-    borderRadius: borderRadius.lg, // More rounded
-    marginBottom: spacing.sm,
+    alignItems: 'flex-start',
+    backgroundColor: '#FFFFFF', // White background
+    padding: 12,
+    borderRadius: 16, // Softer corners
+    marginBottom: 10,
     borderWidth: 1,
-    borderColor: '#F3E5F5',
+    borderColor: '#F3E5F5', // Very light purple border
+    shadowColor: '#AB47BC',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
   destNumberContainer: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#AB47BC', // Vibrant purple
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#AC58FF', // Vivid purple
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: spacing.md,
+    marginRight: 12,
   },
   destNumber: {
     color: '#FFF',
     fontWeight: 'bold',
-    fontSize: 14,
+    fontSize: 16,
   },
   destInfo: {
     flex: 1,
+    paddingRight: 8,
   },
   destName: {
-    fontSize: typography.fontSize.base,
+    fontSize: 16,
     fontWeight: 'bold',
-    color: '#212121',
+    color: '#000',
     marginBottom: 2,
   },
   destLocation: {
-    fontSize: typography.fontSize.sm,
+    fontSize: 14,
     color: '#757575',
-    marginBottom: 2,
+    marginBottom: 4,
   },
   destTracking: {
-    fontSize: 12,
-    color: '#AB47BC', // Purple text for tracking
-    fontWeight: '600',
+    fontSize: 13,
+    color: '#7C4DFF', // Deep Purple
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
   flowContainer: {
     backgroundColor: '#FFFFFF',

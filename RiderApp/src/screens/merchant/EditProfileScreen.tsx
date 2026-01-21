@@ -112,7 +112,7 @@ export default function EditProfileScreen() {
   return (
     <View style={styles.container}>
       {/* Orange Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
         <TouchableOpacity 
           style={styles.backButton}
           onPress={() => {
@@ -256,12 +256,10 @@ const styles = StyleSheet.create({
   },
   header: {
     backgroundColor: colors.primary,
-    paddingTop: Platform.OS === 'ios' ? 50 : 30,
     paddingBottom: 40,
     paddingHorizontal: spacing.lg,
     borderBottomLeftRadius: 30,
     borderBottomRightRadius: 30,
-    minHeight: 160,
   },
   backButton: {
     marginBottom: spacing.md,

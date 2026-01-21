@@ -23,32 +23,19 @@ export default function HelpCenterScreen() {
       color: "#4CAF50", // Green
       backgroundColor: "#E8F5E9", // Light green
       onPress: () => {
-        console.log("Live Chat button pressed");
-        // Get the root navigator - HelpCenter is in root Stack, so parent should be root
         const rootNavigator = navigation.getParent() || navigation;
-
         try {
-          // Navigate to ChatSupport screen
           if (rootNavigator && typeof rootNavigator.navigate === "function") {
-            console.log("Navigating to ChatSupport");
             rootNavigator.navigate("ChatSupport" as never);
           } else {
-            // Fallback: use CommonActions
-            console.log("Using CommonActions fallback");
             navigation.dispatch(
               CommonActions.navigate({
                 name: "ChatSupport",
               })
             );
           }
-        } catch (error: any) {
+        } catch (error) {
           console.error("Navigation error:", error);
-          // Last resort: try with CommonActions
-          navigation.dispatch(
-            CommonActions.navigate({
-              name: "ChatSupport",
-            })
-          );
         }
       },
     },
@@ -59,9 +46,20 @@ export default function HelpCenterScreen() {
       color: "#2196F3", // Blue
       backgroundColor: "#E3F2FD", // Light blue
       onPress: () => {
-        // Navigate to FAQs section or scroll to it
-        // For now, we'll just show a message
-        console.log("FAQs pressed");
+        const rootNavigator = navigation.getParent() || navigation;
+        try {
+          if (rootNavigator && typeof rootNavigator.navigate === "function") {
+            rootNavigator.navigate("FAQ" as never);
+          } else {
+             navigation.dispatch(
+              CommonActions.navigate({
+                name: "FAQ",
+              })
+            );
+          }
+        } catch (error) {
+          console.error("Navigation error:", error);
+        }
       },
     },
     {

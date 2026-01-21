@@ -143,7 +143,7 @@ export default function VerifyOTPScreen({ navigation, route }: VerifyOTPScreenPr
     setResending(true);
 
     try {
-      const response = await authApi.forgotPassword(email);
+      const response: any = await authApi.forgotPassword(email);
 
       if (response.success) {
         Alert.alert(
@@ -202,7 +202,7 @@ export default function VerifyOTPScreen({ navigation, route }: VerifyOTPScreenPr
           {otp.map((digit, index) => (
             <TextInput
               key={index}
-              ref={(ref) => (inputRefs.current[index] = ref)}
+              ref={(ref) => { inputRefs.current[index] = ref; }}
               style={[
                 styles.otpInput,
                 styles.otpInputEmpty, // Always show empty state first

@@ -113,17 +113,26 @@ export default function ShipmentsListScreen() {
   };
 
   // -- Render Items --
-  const renderItem: ListRenderItem<Shipment> = ({ item }) => (
+  const renderItem: ListRenderItem<Shipment> = ({ item }) => {
+    // Determine if this is a franchise/bulk order
+    // In a real app, check item.shipmentType === 'franchise'
+    const isFranchise = item.packageCount > 1;
+
+    return (
     <TouchableOpacity 
       style={styles.shipmentCard}
       onPress={() => {
-        setSelectedShipmentId(item.id);
-        setShowShipmentPopup(true);
+        if (isFranchise) {
+             navigation.navigate('FranchiseOrderDetails', { shipment: item });
+        } else {
+             setSelectedShipmentId(item.id);
+             setShowShipmentPopup(true);
+        }
       }}
     >
       <View style={styles.shipmentHeader}>
         <View style={styles.shipmentHeaderLeft}>
-          <Ionicons name="cube" size={20} color={colors.primary} />
+          <Ionicons name={isFranchise ? "business" : "cube"} size={20} color={isFranchise ? '#8A2BE2' : colors.primary} />
           <Text style={styles.trackingId}>{item.trackingNumber}</Text>
         </View>
         <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) }]}>
@@ -134,12 +143,16 @@ export default function ShipmentsListScreen() {
       <View style={styles.shipmentContent}>
         <View style={styles.recipientRow}>
           <Ionicons name="person-outline" size={16} color={colors.textLight} />
-          <Text style={styles.recipient}>{item.recipientName}</Text>
+          <Text style={styles.recipient}>
+              {isFranchise ? 'Multiple Receivers' : item.recipientName}
+          </Text>
         </View>
 
         <View style={styles.addressRow}>
           <Ionicons name="location-outline" size={16} color={colors.textLight} />
-          <Text style={styles.address} numberOfLines={1}>{item.deliveryAddress}</Text>
+          <Text style={styles.address} numberOfLines={1}>
+              {item.deliveryAddress}
+          </Text>
         </View>
 
         <View style={styles.shipmentFooter}>
@@ -154,10 +167,21 @@ export default function ShipmentsListScreen() {
           </Text>
         </View>
 
+        {isFranchise && (
+            <TouchableOpacity 
+                style={styles.trackButton}
+                onPress={() => navigation.navigate('FranchiseOrderDetails', { shipment: item })}
+            >
+                <Text style={styles.trackButtonText}>Track All Orders</Text>
+                <Ionicons name="arrow-forward" size={16} color="white" />
+            </TouchableOpacity>
+        )}
+
         <Text style={styles.date}>{formatDate(item.createdAt)}</Text>
       </View>
     </TouchableOpacity>
   );
+  };
 
   const renderFooter = () => {
     if (!isFetchingNextPage) return <View style={{ height: 100 }} />; // Bottom padding
@@ -524,11 +548,24 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 8,
+  },
+  trackButton: {
+    backgroundColor: '#8A2BE2', // Purple
+    borderRadius: borderRadius.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    marginTop: spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+  },
+  trackButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: typography.fontSize.sm,
   },
 });
 
