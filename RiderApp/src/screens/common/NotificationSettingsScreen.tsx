@@ -331,9 +331,10 @@ const ToggleItem = ({ icon, label, desc, value, onValueChange, color, bg, disabl
     <Switch
       value={value}
       onValueChange={onValueChange}
-      trackColor={{ false: '#767577', true: colors.primary }}
-      thumbColor={Platform.OS === 'ios' ? undefined : colors.textWhite}
+      trackColor={{ false: '#E0E0E0', true: colors.primary }}
+      thumbColor={'#FFFFFF'}
       disabled={disabled}
+      ios_backgroundColor="#E0E0E0"
     />
   </View>
 );

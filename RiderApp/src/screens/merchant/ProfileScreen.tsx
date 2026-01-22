@@ -276,57 +276,6 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Delivered Orders Summary Card */}
-        <View style={styles.deliveredSummaryCard}>
-          <View style={styles.deliveredSummaryHeader}>
-            <View style={styles.deliveredSummaryTitleRow}>
-              <Ionicons name="checkmark-circle" size={24} color={colors.success} />
-              <Text style={styles.deliveredSummaryTitle}>Delivered Orders</Text>
-            </View>
-            <TouchableOpacity onPress={() => handleNavigation("DeliveredOrders")}>
-              <Text style={styles.viewAllText}>View All</Text>
-            </TouchableOpacity>
-          </View>
-
-          {loading ? (
-            <View style={styles.deliveredSummaryLoading}>
-              <ActivityIndicator size="small" color={colors.primary} />
-            </View>
-          ) : (
-            <>
-              <View style={styles.deliveredStatsRow}>
-                <View style={styles.deliveredStatItem}>
-                  <Text style={[styles.deliveredStatNumber, { color: colors.success }]}>
-                    {deliveredStats.total}
-                  </Text>
-                  <Text style={styles.deliveredStatLabel}>Total</Text>
-                </View>
-                <View style={styles.deliveredStatDivider} />
-                <View style={styles.deliveredStatItem}>
-                  <Text style={[styles.deliveredStatNumber, { color: colors.info }]}>
-                    {deliveredStats.recent}
-                  </Text>
-                  <Text style={styles.deliveredStatLabel}>This Week</Text>
-                </View>
-                <View style={styles.deliveredStatDivider} />
-                <View style={styles.deliveredStatItem}>
-                  <Text style={[styles.deliveredStatNumber, { color: colors.primary }]}>
-                    ${deliveredStats.totalValue.toFixed(0)}
-                  </Text>
-                  <Text style={styles.deliveredStatLabel}>Value</Text>
-                </View>
-              </View>
-
-              <TouchableOpacity 
-                style={styles.deliveredViewButton}
-                onPress={() => handleNavigation("DeliveredOrders")}
-              >
-                <Text style={styles.deliveredViewButtonText}>View Delivered Orders</Text>
-                <Ionicons name="arrow-forward" size={18} color={colors.primary} />
-              </TouchableOpacity>
-            </>
-          )}
-        </View>
 
         {/* Order Management Section */}
         <Text style={styles.sectionTitle}>Order Management</Text>

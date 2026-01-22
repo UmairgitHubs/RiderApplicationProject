@@ -17,14 +17,14 @@ import { deliveredOrdersApi } from '../../services/api';
 
 interface DeliveredOrder {
   id: string;
-  tracking_number?: string;
-  recipient_name?: string;
-  recipient_phone?: string;
-  delivery_address?: string;
-  cod_amount?: number;
+  trackingNumber?: string;
+  recipientName?: string;
+  recipientPhone?: string;
+  deliveryAddress?: string;
+  codAmount?: number; // Backend returns string or number? Controller says `s.cod_amount` (Decimal). JSON usually number.
   status: string;
-  delivered_at?: string;
-  created_at?: string;
+  deliveredAt?: string;
+  createdAt?: string;
 }
 
 export default function DeliveredOrdersScreen() {
@@ -51,26 +51,28 @@ export default function DeliveredOrdersScreen() {
       const response = await deliveredOrdersApi.getDeliveredOrders({
         limit: 100,
         search: searchQuery || undefined,
-      });
+      }) as any;
       
       if (response.success && response.data?.shipments) {
         const deliveredOrders = response.data.shipments;
         setOrders(deliveredOrders);
 
-        // Calculate stats
-        const total = deliveredOrders.length;
+        // Stats calculation
+        // Use server total if available, otherwise local length
+        const serverTotal = response.data.pagination?.total;
+        const total = serverTotal !== undefined ? serverTotal : deliveredOrders.length;
+
         const returnable = deliveredOrders.filter((order: any) => {
-          // Orders are returnable if delivered within last 7 days
-          if (!order.delivered_at) return false;
-          const deliveredDate = new Date(order.delivered_at);
-          const daysSinceDelivery = Math.floor(
-            (Date.now() - deliveredDate.getTime()) / (1000 * 60 * 60 * 24)
-          );
-          return daysSinceDelivery <= 7;
+          const dateStr = order.deliveredAt || order.createdAt;
+          if (!dateStr) return false;
+          const deliveredDate = new Date(dateStr);
+          const daysSince = Math.floor((Date.now() - deliveredDate.getTime()) / (1000 * 60 * 60 * 24));
+          return daysSince <= 7;
         }).length;
         
         const totalValue = deliveredOrders.reduce((sum: number, order: any) => {
-          return sum + (parseFloat(order.cod_amount?.toString() || '0') || 0);
+          const val = order.codAmount ? parseFloat(order.codAmount.toString()) : 0;
+          return sum + val;
         }, 0);
 
         setStats({ total, returnable, totalValue });
@@ -99,13 +101,11 @@ export default function DeliveredOrdersScreen() {
     });
   };
 
-  const getDaysLeft = (deliveredAt?: string) => {
-    if (!deliveredAt) return 0;
-    const deliveredDate = new Date(deliveredAt);
-    const daysSinceDelivery = Math.floor(
-      (Date.now() - deliveredDate.getTime()) / (1000 * 60 * 60 * 24)
-    );
-    return Math.max(0, 7 - daysSinceDelivery);
+  const getDaysLeft = (dateString?: string) => {
+    if (!dateString) return 0;
+    const date = new Date(dateString);
+    const daysSince = Math.floor((Date.now() - date.getTime()) / (1000 * 60 * 60 * 24));
+    return Math.max(0, 7 - daysSince);
   };
 
   const formatPrice = (amount?: number | string) => {
@@ -117,9 +117,8 @@ export default function DeliveredOrdersScreen() {
     if (!searchQuery) return true;
     const query = searchQuery.toLowerCase();
     return (
-      order.tracking_number?.toLowerCase().includes(query) ||
-      order.recipient_name?.toLowerCase().includes(query) ||
-      order.recipient_phone?.toLowerCase().includes(query)
+      (order.trackingNumber && order.trackingNumber.toLowerCase().includes(query)) ||
+      (order.recipientName && order.recipientName.toLowerCase().includes(query))
     );
   });
 
@@ -204,7 +203,8 @@ export default function DeliveredOrdersScreen() {
             </View>
           ) : (
             filteredOrders.map((order) => {
-              const daysLeft = getDaysLeft(order.delivered_at || order.created_at);
+              const dateToUse = order.deliveredAt || order.createdAt;
+              const daysLeft = getDaysLeft(dateToUse);
               const isReturnable = daysLeft > 0;
               
               return (
@@ -230,10 +230,10 @@ export default function DeliveredOrdersScreen() {
                     <View style={styles.orderHeader}>
                       <View style={styles.orderHeaderLeft}>
                         <Text style={styles.customerName}>
-                          {order.recipient_name || 'Customer'}
+                          {order.recipientName || 'Customer'}
                         </Text>
                         <Text style={styles.orderId}>
-                          {order.tracking_number || order.id}
+                          {order.trackingNumber || order.id}
                         </Text>
                       </View>
                       <View style={styles.deliveredTag}>
@@ -244,14 +244,14 @@ export default function DeliveredOrdersScreen() {
                     <View style={styles.orderRow}>
                       <Ionicons name="calendar-outline" size={16} color={colors.text} />
                       <Text style={styles.deliveryDate}>
-                        {formatDate(order.delivered_at || order.created_at)}
+                        {formatDate(dateToUse)}
                       </Text>
                     </View>
 
                     <View style={styles.orderRow}>
                       <Text style={styles.rowLabel}>Amount</Text>
                       <Text style={styles.amount}>
-                        {formatPrice(order.cod_amount)}
+                        {formatPrice(order.codAmount)}
                       </Text>
                     </View>
 

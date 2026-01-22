@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -10,10 +10,13 @@ import {
   Alert,
   Image,
   ActivityIndicator,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, typography, spacing, borderRadius } from '../../theme';
 import { useCreateShipment } from '../../hooks/useShipments';
+import { useSystemSettings } from '../../hooks/useSystemSettings';
 import FranchiseShipmentScreen from './FranchiseShipmentScreen';
 import IndividualShipmentScreen from './IndividualShipmentScreen';
 
@@ -27,8 +30,10 @@ interface Package {
 }
 
 export default function CreateShipmentScreen({ navigation, route }: any) {
+  const insets = useSafeAreaInsets();
   const shipmentType = route?.params?.shipmentType;
   const { mutateAsync: createShipment, isPending: isCreating } = useCreateShipment();
+  const { data: settings, isLoading: isLoadingSettings } = useSystemSettings();
   
   // If franchise type, render franchise screen
   if (shipmentType === 'franchise') {
@@ -62,6 +67,21 @@ export default function CreateShipmentScreen({ navigation, route }: any) {
     },
   ]);
 
+
+  // Calculate fees
+  const estimatedTotal = useMemo(() => {
+    const baseFee = Number(settings?.base_delivery_fee || 100);
+    const perPackageFee = 10; // Fixed fee per additional package
+    const extraPackages = Math.max(0, packages.length - 1);
+    const total = baseFee + (extraPackages * perPackageFee);
+    return {
+      baseFee,
+      perPackageFee,
+      extraPackages,
+      total,
+      currency: settings?.currency || 'PKR'
+    };
+  }, [settings, packages.length]);
 
   const addPackage = () => {
     setPackages([
@@ -119,6 +139,7 @@ export default function CreateShipmentScreen({ navigation, route }: any) {
           description: pkg.description || undefined,
         })),
         specialInstructions: specialInstructions || undefined,
+        deliveryFee: estimatedTotal.total,
       };
 
       console.log('Creating shipment with data:', JSON.stringify(shipmentData, null, 2));
@@ -127,7 +148,7 @@ export default function CreateShipmentScreen({ navigation, route }: any) {
 
       Alert.alert(
         'Success',
-        `Shipment created successfully with ${packages.length} package(s)!`,
+        `Shipment created successfully!\nTotal Fee: ${estimatedTotal.currency} ${estimatedTotal.total.toFixed(2)}`,
         [
           {
             text: 'OK',
@@ -303,7 +324,7 @@ export default function CreateShipmentScreen({ navigation, route }: any) {
   return (
     <View style={styles.container}>
       {/* Orange Rounded Header */}
-      <View style={styles.orangeHeader}>
+      <View style={[styles.orangeHeader, { paddingTop: insets.top + (Platform.OS === 'ios' ? 10 : 20) }]}>
         <TouchableOpacity 
           style={styles.backButton}
           onPress={() => navigation.goBack()}
@@ -317,199 +338,218 @@ export default function CreateShipmentScreen({ navigation, route }: any) {
         </View>
       </View>
 
-      <ScrollView 
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
+      <KeyboardAvoidingView 
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={{ flex: 1 }}
       >
-        {/* Recipient Information */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Recipient Information</Text>
-          
-          <Text style={styles.label}>Full Name *</Text>
-          <View style={styles.inputContainer}>
-            <Ionicons name="person-outline" size={20} color={colors.textLight} style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="John Doe"
-              placeholderTextColor={colors.textLight}
-              value={recipientName}
-              onChangeText={setRecipientName}
-            />
-          </View>
-
-          <Text style={styles.label}>Phone Number *</Text>
-          <View style={styles.inputContainer}>
-            <Ionicons name="call-outline" size={20} color={colors.textLight} style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="+1 (555) 000-0000"
-              placeholderTextColor={colors.textLight}
-              value={recipientPhone}
-              onChangeText={setRecipientPhone}
-              keyboardType="phone-pad"
-            />
-          </View>
-          <Text style={styles.label}>City *</Text>
-          <View style={styles.inputContainer}>
-            <Ionicons name="business-outline" size={20} color={colors.textLight} style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="New York"
-              placeholderTextColor={colors.textLight}
-              value={recipientCity}
-              onChangeText={setRecipientCity}
-            />
-          </View>
-        </View>
-
-        {/* Pickup & Delivery Addresses */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Addresses</Text>
-          
-          <Text style={styles.label}>Pickup Address *</Text>
-          <View style={styles.inputContainer}>
-            <Ionicons name="location-outline" size={20} color={colors.success} style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="123 Main St, Manhattan, NY 10001"
-              placeholderTextColor={colors.textLight}
-              value={pickupAddress}
-              onChangeText={setPickupAddress}
-              multiline
-            />
-            <TouchableOpacity
-              style={styles.mapButton}
-              onPress={() => {
-                const parent = navigation.getParent();
-                if (parent) {
-                  parent.navigate('MapSelection', {
-                    title: 'Select Pickup Location',
-                    onLocationSelect: (location: any) => {
-                      setPickupAddress(`${location.latitude}, ${location.longitude}`);
-                    },
-                  });
-                }
-              }}
-            >
-              <Ionicons name="map-outline" size={20} color={colors.success} />
-            </TouchableOpacity>
-          </View>
-
-          <Text style={styles.label}>Pickup City *</Text>
-          <View style={styles.inputContainer}>
-            <Ionicons name="business-outline" size={20} color={colors.success} style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="New York"
-              placeholderTextColor={colors.textLight}
-              value={pickupCity}
-              onChangeText={setPickupCity}
-            />
-          </View>
-
-          <Text style={styles.label}>Delivery Address *</Text>
-          <View style={styles.inputContainer}>
-            <Ionicons name="location" size={20} color={colors.error} style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="456 Park Ave, Brooklyn, NY 11201"
-              placeholderTextColor={colors.textLight}
-              value={deliveryAddress}
-              onChangeText={setDeliveryAddress}
-              multiline
-            />
-            <TouchableOpacity
-              style={styles.mapButton}
-              onPress={() => {
-                const parent = navigation.getParent();
-                if (parent) {
-                  parent.navigate('MapSelection', {
-                    title: 'Select Delivery Location',
-                    onLocationSelect: (location: any) => {
-                      setDeliveryAddress(`${location.latitude}, ${location.longitude}`);
-                    },
-                  });
-                }
-              }}
-            >
-              <Ionicons name="map-outline" size={20} color={colors.error} />
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Packages Information */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Packages ({packages.length})</Text>
-            <TouchableOpacity
-              style={styles.addPackageButton}
-              onPress={addPackage}
-            >
-              <Ionicons name="add-circle" size={24} color={colors.primary} />
-              <Text style={styles.addPackageText}>Add Package</Text>
-            </TouchableOpacity>
-          </View>
-          
-          <Text style={styles.sectionSubtitle}>
-            Each package will get its own barcode for individual tracking
-          </Text>
-
-          {packages.map((pkg, index) => renderPackage(pkg, index))}
-        </View>
-
-        {/* Special Instructions */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Special Instructions (Optional)</Text>
-          
-          <View style={[styles.inputContainer, styles.textAreaContainer]}>
-            <TextInput
-              style={[styles.input, styles.textArea]}
-              placeholder="Add any special delivery instructions..."
-              placeholderTextColor={colors.textLight}
-              value={specialInstructions}
-              onChangeText={setSpecialInstructions}
-              multiline
-              numberOfLines={4}
-              textAlignVertical="top"
-            />
-          </View>
-        </View>
-
-        {/* Delivery Fee Estimate */}
-        <View style={styles.feeCard}>
-          <View style={styles.feeRow}>
-            <Text style={styles.feeLabel}>Base Fee</Text>
-            <Text style={styles.feeValue}>PKR 100</Text>
-          </View>
-          <View style={styles.feeDivider} />
-          <View style={styles.feeRow}>
-            <Text style={styles.feeLabel}>Package Count</Text>
-            <Text style={styles.feeValue}>{packages.length} package(s)</Text>
-          </View>
-          <View style={styles.feeDivider} />
-          <View style={styles.feeRow}>
-            <Text style={styles.feeLabelTotal}>Estimated Total</Text>
-            <Text style={styles.feeTotalValue}>PKR {100 + (packages.length * 10)}</Text>
-          </View>
-        </View>
-
-        {/* Create Shipment Button */}
-        <TouchableOpacity 
-          style={[styles.createButton, isCreating && styles.createButtonDisabled]}
-          onPress={handleCreateShipment}
-          disabled={isCreating}
+        <ScrollView 
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
         >
-          {isCreating ? (
-            <ActivityIndicator size="small" color={colors.textWhite} />
+          {/* Recipient Information */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Recipient Information</Text>
+            
+            <Text style={styles.label}>Full Name *</Text>
+            <View style={styles.inputContainer}>
+              <Ionicons name="person-outline" size={20} color={colors.textLight} style={styles.inputIcon} />
+              <TextInput
+                style={styles.input}
+                placeholder="John Doe"
+                placeholderTextColor={colors.textLight}
+                value={recipientName}
+                onChangeText={setRecipientName}
+              />
+            </View>
+
+            <Text style={styles.label}>Phone Number *</Text>
+            <View style={styles.inputContainer}>
+              <Ionicons name="call-outline" size={20} color={colors.textLight} style={styles.inputIcon} />
+              <TextInput
+                style={styles.input}
+                placeholder="+1 (555) 000-0000"
+                placeholderTextColor={colors.textLight}
+                value={recipientPhone}
+                onChangeText={setRecipientPhone}
+                keyboardType="phone-pad"
+              />
+            </View>
+            <Text style={styles.label}>City *</Text>
+            <View style={styles.inputContainer}>
+              <Ionicons name="business-outline" size={20} color={colors.textLight} style={styles.inputIcon} />
+              <TextInput
+                style={styles.input}
+                placeholder="New York"
+                placeholderTextColor={colors.textLight}
+                value={recipientCity}
+                onChangeText={setRecipientCity}
+              />
+            </View>
+          </View>
+
+          {/* Pickup & Delivery Addresses */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Addresses</Text>
+            
+            <Text style={styles.label}>Pickup Address *</Text>
+            <View style={styles.inputContainer}>
+              <Ionicons name="location-outline" size={20} color={colors.success} style={styles.inputIcon} />
+              <TextInput
+                style={styles.input}
+                placeholder="123 Main St, Manhattan, NY 10001"
+                placeholderTextColor={colors.textLight}
+                value={pickupAddress}
+                onChangeText={setPickupAddress}
+                multiline
+              />
+              <TouchableOpacity
+                style={styles.mapButton}
+                onPress={() => {
+                  const parent = navigation.getParent();
+                  if (parent) {
+                    parent.navigate('MapSelection', {
+                      title: 'Select Pickup Location',
+                      onLocationSelect: (location: any) => {
+                        setPickupAddress(`${location.latitude}, ${location.longitude}`);
+                      },
+                    });
+                  }
+                }}
+              >
+                <Ionicons name="map-outline" size={20} color={colors.success} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.label}>Pickup City *</Text>
+            <View style={styles.inputContainer}>
+              <Ionicons name="business-outline" size={20} color={colors.success} style={styles.inputIcon} />
+              <TextInput
+                style={styles.input}
+                placeholder="New York"
+                placeholderTextColor={colors.textLight}
+                value={pickupCity}
+                onChangeText={setPickupCity}
+              />
+            </View>
+
+            <Text style={styles.label}>Delivery Address *</Text>
+            <View style={styles.inputContainer}>
+              <Ionicons name="location" size={20} color={colors.error} style={styles.inputIcon} />
+              <TextInput
+                style={styles.input}
+                placeholder="456 Park Ave, Brooklyn, NY 11201"
+                placeholderTextColor={colors.textLight}
+                value={deliveryAddress}
+                onChangeText={setDeliveryAddress}
+                multiline
+              />
+              <TouchableOpacity
+                style={styles.mapButton}
+                onPress={() => {
+                  const parent = navigation.getParent();
+                  if (parent) {
+                    parent.navigate('MapSelection', {
+                      title: 'Select Delivery Location',
+                      onLocationSelect: (location: any) => {
+                        setDeliveryAddress(`${location.latitude}, ${location.longitude}`);
+                      },
+                    });
+                  }
+                }}
+              >
+                <Ionicons name="map-outline" size={20} color={colors.error} />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Packages Information */}
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Packages ({packages.length})</Text>
+              <TouchableOpacity
+                style={styles.addPackageButton}
+                onPress={addPackage}
+              >
+                <Ionicons name="add-circle" size={24} color={colors.primary} />
+                <Text style={styles.addPackageText}>Add Package</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <Text style={styles.sectionSubtitle}>
+              Each package will get its own barcode for individual tracking
+            </Text>
+
+            {packages.map((pkg, index) => renderPackage(pkg, index))}
+          </View>
+
+          {/* Special Instructions */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Special Instructions (Optional)</Text>
+            
+            <View style={[styles.inputContainer, styles.textAreaContainer]}>
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                placeholder="Add any special delivery instructions..."
+                placeholderTextColor={colors.textLight}
+                value={specialInstructions}
+                onChangeText={setSpecialInstructions}
+                multiline
+                numberOfLines={4}
+                textAlignVertical="top"
+              />
+            </View>
+          </View>
+
+          {/* Delivery Fee Estimate */}
+        <View style={styles.feeCard}>
+          {isLoadingSettings ? (
+            <ActivityIndicator size="small" color={colors.primary} />
           ) : (
-            <Ionicons name="checkmark-circle" size={24} color={colors.textWhite} />
+            <>
+              <View style={styles.feeRow}>
+                <Text style={styles.feeLabel}>Base Fee</Text>
+                <Text style={styles.feeValue}>
+                  {estimatedTotal.currency} {estimatedTotal.baseFee.toFixed(2)}
+                </Text>
+              </View>
+              <View style={styles.feeDivider} />
+              <View style={styles.feeRow}>
+                <Text style={styles.feeLabel}>Additional Packages</Text>
+                <Text style={styles.feeValue}>
+                  {estimatedTotal.extraPackages > 0 
+                    ? `${estimatedTotal.extraPackages} x ${estimatedTotal.currency} ${estimatedTotal.perPackageFee}` 
+                    : 'None'}
+                </Text>
+              </View>
+              <View style={styles.feeDivider} />
+              <View style={styles.feeRow}>
+                <Text style={styles.feeLabelTotal}>Estimated Total</Text>
+                <Text style={styles.feeTotalValue}>
+                  {estimatedTotal.currency} {estimatedTotal.total.toFixed(2)}
+                </Text>
+              </View>
+            </>
           )}
-          <Text style={styles.createButtonText}>
-            {isCreating ? 'Creating...' : 'Create Shipment'}
-          </Text>
-        </TouchableOpacity>
-      </ScrollView>
+        </View>
+
+          {/* Create Shipment Button */}
+          <TouchableOpacity 
+            style={[styles.createButton, isCreating && styles.createButtonDisabled]}
+            onPress={handleCreateShipment}
+            disabled={isCreating}
+          >
+            {isCreating ? (
+              <ActivityIndicator size="small" color={colors.textWhite} />
+            ) : (
+              <Ionicons name="checkmark-circle" size={24} color={colors.textWhite} />
+            )}
+            <Text style={styles.createButtonText}>
+              {isCreating ? 'Creating...' : 'Create Shipment'}
+            </Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }
@@ -518,6 +558,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.backgroundLight,
+  },
+  keyboardAvoidingView: {
+    flex: 1,
   },
   orangeHeader: {
     backgroundColor: colors.primary,
@@ -530,6 +573,9 @@ const styles = StyleSheet.create({
   },
   backButton: {
     marginBottom: spacing.md,
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
   },
   headerTextContainer: {
     marginTop: spacing.sm,
@@ -550,10 +596,11 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: spacing.lg,
-    paddingBottom: spacing.xl,
+    paddingBottom: spacing.xl + 40, // Extra padding for safe area
   },
   section: {
     marginBottom: spacing.xl,
+    width: '100%',
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -587,6 +634,8 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.lg,
     paddingHorizontal: spacing.md,
     marginBottom: spacing.md,
+    width: '100%',
+    minHeight: 50,
   },
   textAreaContainer: {
     alignItems: 'flex-start',
@@ -600,6 +649,7 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.base,
     color: colors.text,
     paddingVertical: spacing.md,
+    height: '100%', // Ensure input takes full height of container
   },
   mapButton: {
     padding: spacing.sm,
@@ -608,6 +658,7 @@ const styles = StyleSheet.create({
   textArea: {
     minHeight: 100,
     paddingTop: spacing.md,
+    textAlignVertical: 'top',
   },
   packageCard: {
     backgroundColor: colors.background,
@@ -616,6 +667,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     borderWidth: 1,
     borderColor: colors.border,
+    width: '100%',
   },
   packageHeader: {
     flexDirection: 'row',
@@ -647,35 +699,40 @@ const styles = StyleSheet.create({
   },
   sizeContainer: {
     flexDirection: 'row',
-    gap: spacing.md,
+    gap: spacing.sm, // Reduced gap size for small screens
     marginBottom: spacing.md,
+    flexWrap: 'wrap', // Allow wrap on very small screens if needed
   },
   sizeButton: {
     flex: 1,
+    minWidth: 80, // Minimum width to prevent crushing content
     backgroundColor: colors.backgroundInput,
     borderRadius: borderRadius.lg,
-    padding: spacing.md,
+    padding: spacing.sm, // Reduced padding for creating more space
     alignItems: 'center',
     borderWidth: 2,
     borderColor: 'transparent',
+    justifyContent: 'center',
   },
   sizeButtonActive: {
     backgroundColor: colors.primary,
     borderColor: colors.primary,
   },
   sizeText: {
-    fontSize: typography.fontSize.base,
+    fontSize: typography.fontSize.sm, // Slightly smaller
     fontWeight: typography.fontWeight.bold,
     color: colors.text,
     marginTop: spacing.xs,
+    textAlign: 'center',
   },
   sizeTextActive: {
     color: colors.textWhite,
   },
   sizeSubtext: {
-    fontSize: typography.fontSize.xs,
+    fontSize: typography.fontSize.xs, // Smaller font for subtext
     color: colors.textLight,
-    marginTop: spacing.xs,
+    marginTop: 2,
+    textAlign: 'center',
   },
   sizeSubtextActive: {
     color: colors.textWhite,
@@ -691,6 +748,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
+    width: '100%',
   },
   feeRow: {
     flexDirection: 'row',
@@ -706,6 +764,7 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.base,
     color: colors.text,
     fontWeight: typography.fontWeight.medium,
+    textAlign: 'right',
   },
   feeLabelTotal: {
     fontSize: typography.fontSize.lg,
@@ -716,6 +775,7 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize['2xl'],
     color: colors.primary,
     fontWeight: typography.fontWeight.bold,
+    textAlign: 'right',
   },
   feeDivider: {
     height: 1,
@@ -735,6 +795,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 4,
     elevation: 4,
+    width: '100%',
+    minHeight: 56, // Accessible touch target
   },
   createButtonText: {
     color: colors.textWhite,

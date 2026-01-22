@@ -59,6 +59,22 @@ export default function FranchiseOrderDetailsScreen() {
       }
   };
 
+  const getStatusInfo = (status: string) => {
+    const statusMap: { [key: string]: { label: string; color: string; bg: string } } = {
+      pending: { label: 'Pending Pickup', color: '#FF9800', bg: '#FFF3E0' },
+      assigned: { label: 'Assigned', color: '#03A9F4', bg: '#E1F5FE' },
+      picked_up: { label: 'Picked Up', color: '#9C27B0', bg: '#F3E5F5' },
+      in_transit: { label: 'In Transit', color: '#9C27B0', bg: '#F3E5F5' },
+      delivered: { label: 'Delivered', color: '#4CAF50', bg: '#E8F5E9' },
+      cancelled: { label: 'Cancelled', color: '#F44336', bg: '#FFEBEE' },
+      returned: { label: 'Returned', color: '#F44336', bg: '#FFEBEE' },
+    };
+    return statusMap[status] || { label: status, color: '#757575', bg: '#EEEEEE' };
+  };
+
+  const currentStatus = shipmentsList.length > 0 ? shipmentsList[0].status : (shipment?.status || 'pending');
+  const statusInfo = getStatusInfo(currentStatus);
+
   return (
     <View style={styles.container}>
       {/* Header */}
@@ -70,8 +86,8 @@ export default function FranchiseOrderDetailsScreen() {
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Franchise Bulk Order</Text>
-        <View style={styles.activeBadge}>
-          <Text style={styles.activeBadgeText}>Active</Text>
+        <View style={[styles.activeBadge, { backgroundColor: statusInfo.bg }]}>
+          <Text style={[styles.activeBadgeText, { color: statusInfo.color }]}>{statusInfo.label}</Text>
         </View>
       </View>
 
@@ -99,8 +115,8 @@ export default function FranchiseOrderDetailsScreen() {
                  <Text style={styles.orderId}>{orderId}</Text>
                  <Text style={styles.itemCount}>{shipmentsList.length || itemCount} pieces • {shipmentsList.length || itemCount} different customers</Text>
              </View>
-             <View style={styles.statusBadge}>
-                 <Text style={styles.statusText}>{status}</Text>
+             <View style={[styles.statusBadge, { backgroundColor: statusInfo.bg }]}>
+                 <Text style={[styles.statusText, { color: statusInfo.color }]}>{statusInfo.label}</Text>
              </View>
           </View>
         </View>
@@ -116,7 +132,11 @@ export default function FranchiseOrderDetailsScreen() {
                 </View>
             ) : (
                 shipmentsList.map((dest, index) => (
-                    <View key={dest.id || index} style={styles.destinationRow}>
+                    <TouchableOpacity 
+                        key={dest.id || index} 
+                        style={styles.destinationRow}
+                        onPress={() => (navigation as any).navigate('FranchiseTracking', { shipmentId: dest.id, trackingNumber: dest.trackingNumber })}
+                    >
                         <View style={styles.destinationNumber}>
                             <Text style={styles.destinationNumberText}>{index + 1}</Text>
                         </View>
@@ -128,7 +148,7 @@ export default function FranchiseOrderDetailsScreen() {
                             <Text style={styles.destinationAddress} numberOfLines={1}>{dest.deliveryAddress || 'No Address'}</Text>
                             <Text style={styles.secondaryTrackingId}>{dest.trackingNumber}</Text>
                         </View>
-                    </View>
+                    </TouchableOpacity>
                 ))
             )}
             
@@ -184,9 +204,20 @@ export default function FranchiseOrderDetailsScreen() {
 
       {/* Footer Button */}
       <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 20) }]}>
-         <TouchableOpacity style={styles.trackAllButton}>
+         <TouchableOpacity 
+            style={styles.trackAllButton}
+            onPress={() => {
+                if (shipmentsList.length > 0) {
+                     // If multiple, ideally show map. For now, track the first one.
+                     // In a real app, this would navigate to a 'MapTrackingScreen' with all coordinates.
+                    (navigation as any).navigate('FranchiseTracking', { shipmentId: shipmentsList[0].id, trackingNumber: shipmentsList[0].trackingNumber });
+                } else if (orderId) {
+                     // Fallback if list empty but orderId known (unlikely if dynamic)
+                }
+            }}
+         >
              <Ionicons name="navigate" size={20} color="white" style={{ marginRight: 8 }} />
-             <Text style={styles.trackAllText}>Track All {itemCount} Orders</Text>
+             <Text style={styles.trackAllText}>Track All {shipmentsList.length || itemCount} Orders</Text>
          </TouchableOpacity>
       </View>
     </View>
@@ -345,11 +376,15 @@ const styles = StyleSheet.create({
   destinationHeader: {
       flexDirection: 'row',
       justifyContent: 'space-between',
+      alignItems: 'flex-start', // Align top if name wraps
       marginBottom: 2,
+      gap: 10,
   },
   destinationName: {
       fontWeight: 'bold',
       color: colors.text,
+      flex: 1, // Allow text to take space but respect icon
+      marginRight: 4,
   },
   destinationAddress: {
       fontSize: typography.fontSize.xs,

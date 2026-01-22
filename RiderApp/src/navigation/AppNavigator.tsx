@@ -59,6 +59,8 @@ import ChatScreen from "../screens/common/ChatScreen";
 import ShipmentTrackingScreen from "../screens/merchant/ShipmentTrackingScreen";
 import FAQScreen from '../screens/common/FAQScreen';
 import FranchiseOrderDetailsScreen from "../screens/merchant/FranchiseOrderDetailsScreen";
+import FranchiseTrackingScreen from "../screens/merchant/FranchiseTrackingScreen";
+// Routes type definition
 
 export type RootStackParamList = {
   Splash: undefined;
@@ -128,6 +130,7 @@ export type RootStackParamList = {
   RoutePlanning: { routeType?: "urgent" | "nextDay" } | undefined;
   FAQ: undefined;
   FranchiseOrderDetails: { shipment?: any } | undefined;
+  FranchiseTracking: { shipmentId: string; trackingNumber?: string } | undefined;
 };
 
 const Stack = createStackNavigator<RootStackParamList>();
@@ -263,6 +266,7 @@ export default function AppNavigator() {
         <Stack.Screen name="RoutePlanning" component={RoutePlanningScreen} />
         <Stack.Screen name="FAQ" component={FAQScreen} />
         <Stack.Screen name="FranchiseOrderDetails" component={FranchiseOrderDetailsScreen} />
+        <Stack.Screen name="FranchiseTracking" component={FranchiseTrackingScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

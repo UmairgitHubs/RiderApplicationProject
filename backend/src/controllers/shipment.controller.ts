@@ -538,6 +538,7 @@ export const getMerchantShipments = async (req: Request, res: Response) => {
           // Franchise/Bulk Support
           batchId: s.batch_id,
           shipmentType: s.shipment_type,
+          deliveredAt: s.actual_delivery_time,
         })),
         pagination: {
           page: parseInt(page as string),
@@ -567,8 +568,18 @@ export const getShipmentDetails = async (req: Request, res: Response) => {
     const shipment = await prisma.shipment.findUnique({
       where: { id },
       include: {
-        merchant: { select: { id: true, email: true, full_name: true, phone: true } },
+        merchant: { 
+          select: { 
+            id: true, 
+            email: true, 
+            full_name: true, 
+            phone: true, 
+            merchant: { select: { business_name: true } }
+          } 
+        },
         rider: { select: { id: true, full_name: true, phone: true } },
+        // @ts-ignore
+        hub: { select: { id: true, name: true, city: true } },
         packages: { orderBy: { package_number: 'asc' } },
         tracking_history: { orderBy: { created_at: 'desc' }, take: 10 },
       },
