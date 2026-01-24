@@ -582,6 +582,15 @@ export const getShipmentDetails = async (req: Request, res: Response) => {
         hub: { select: { id: true, name: true, city: true } },
         packages: { orderBy: { package_number: 'asc' } },
         tracking_history: { orderBy: { created_at: 'desc' }, take: 10 },
+        route_stops: {
+          include: {
+            route: {
+              select: {
+                rider_id: true
+              }
+            }
+          }
+        }
       },
     });
 
@@ -592,7 +601,10 @@ export const getShipmentDetails = async (req: Request, res: Response) => {
       });
     }
 
-    if (shipment.merchant_id !== userId && shipment.rider_id !== userId) {
+    // Check if shipment is assigned to the rider via a route
+    const isAssignedViaRoute = shipment.route_stops.some(stop => stop.route.rider_id === userId);
+
+    if (shipment.merchant_id !== userId && shipment.rider_id !== userId && !isAssignedViaRoute) {
       return res.status(403).json({
         success: false,
         error: { code: 'FORBIDDEN', message: 'Access denied.' },

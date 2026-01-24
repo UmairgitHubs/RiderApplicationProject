@@ -8,7 +8,8 @@ import {
   getRouteStats,
   autoOptimize,
   getUnassignedShipments,
-  getAvailableRiders
+  getAvailableRiders,
+  updateRouteStatus
 } from '../controllers/admin.route.controller';
 import { requireAdmin } from '../middleware/admin.middleware';
 import { validateCreateRoute } from '../middleware/validation.middleware';
@@ -25,6 +26,7 @@ router.post('/optimize', autoOptimize);
 router.get('/', getAllRoutes);
 router.get('/:id', getRouteById);
 router.post('/', validateCreateRoute, createRoute);
+router.patch('/:id/status', updateRouteStatus);
 router.patch('/:id', validateCreateRoute, updateRoute);
 
 router.delete('/:id', deleteRoute);

@@ -3,9 +3,10 @@ import { NavigationContainer } from "@react-navigation/native";
 import { createStackNavigator } from "@react-navigation/stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
-import { ActivityIndicator, View, StyleSheet } from "react-native";
+import { ActivityIndicator, View, StyleSheet, AppState, AppStateStatus } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { authApi } from "../services/api";
+import NetInfo from "@react-native-community/netinfo";
+import { authApi, riderApi } from "../services/api";
 import { colors } from "../theme";
 
 // Import auth screens
@@ -44,7 +45,7 @@ import RiderEarningsScreen from "../screens/rider/RiderEarningsScreen";
 import RiderOrderHistoryScreen from "../screens/rider/RiderOrderHistoryScreen";
 import RiderProfileScreen from "../screens/rider/RiderProfileScreen";
 import PerformanceStatsScreen from "../screens/rider/PerformanceStatsScreen";
-import RouteScreen from "../screens/rider/RouteScreen";
+
 import RoutePlanningScreen from "../screens/rider/RoutePlanningScreen";
 import AboutScreen from "../screens/common/AboutScreen";
 import NotificationSettingsScreen from '../screens/common/NotificationSettingsScreen';
@@ -135,11 +136,57 @@ export type RootStackParamList = {
 
 const Stack = createStackNavigator<RootStackParamList>();
 
+// Routes type definition
+
 export default function AppNavigator() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [userRole, setUserRole] = useState<"merchant" | "rider" | null>(null);
   const [hasSeenOnboarding, setHasSeenOnboarding] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Auto-Offline Logic
+  useEffect(() => {
+    let backgroundStartTime: number | null = null;
+    const OFFLINE_TIMEOUT_MS = 5 * 60 * 1000; // 5 Minutes
+
+    // 1. App State Listener (Background/Killed simulation)
+    const subscription = AppState.addEventListener("change", async (nextAppState: AppStateStatus) => {
+      if (nextAppState === 'background' || nextAppState === 'inactive') {
+        backgroundStartTime = Date.now();
+      } else if (nextAppState === 'active') {
+        const now = Date.now();
+        if (backgroundStartTime && (now - backgroundStartTime) > OFFLINE_TIMEOUT_MS) {
+          // App was in background too long
+          if (isAuthenticated && userRole === 'rider') {
+             try {
+               console.log("⚠️ App in background too long. Setting Rider Offline.");
+               await riderApi.toggleOnlineStatus(false);
+             } catch (e) {
+               console.error("Auto-offline failed:", e);
+             }
+          }
+        }
+        backgroundStartTime = null;
+      }
+    });
+
+    // 2. Network State Listener
+    const unsubscribeNet = NetInfo.addEventListener((state: any) => {
+      if (state.isConnected === false) {
+         // Internet lost
+         if (isAuthenticated && userRole === 'rider') {
+             console.log("⚠️ Internet lost. Attempting to set Rider Offline locally/remotely.");
+             // Note: API call might fail if truly offline, but we trigger it for retry/queue if possible
+             riderApi.toggleOnlineStatus(false).catch((err: any) => console.log('Net offline, api failed as expected'));
+         }
+      }
+    });
+
+    return () => {
+      subscription.remove();
+      unsubscribeNet();
+    };
+  }, [isAuthenticated, userRole]);
 
   useEffect(() => {
     checkAuthStatus();
@@ -372,7 +419,7 @@ function RiderNavigator() {
     >
       <RiderTab.Screen name="Home" component={RiderDashboard} />
       <RiderTab.Screen name="Deliveries" component={AvailableOrdersScreen} />
-      <RiderTab.Screen name="Route" component={RouteScreen} />
+      <RiderTab.Screen name="Route" component={RoutePlanningScreen} />
       <RiderTab.Screen name="Earnings" component={RiderEarningsScreen} />
       <RiderTab.Screen name="Account" component={RiderProfileScreen} />
     </RiderTab.Navigator>

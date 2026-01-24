@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React from 'react';
 import {
   View,
   Text,
@@ -8,274 +8,136 @@ import {
   Platform,
   ActivityIndicator,
   RefreshControl,
-  Alert,
+  Switch
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { useNavigation } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, typography, spacing, borderRadius } from '../../theme';
-import { riderApi, authApi } from '../../services/api';
-
-interface Delivery {
-  id: string;
-  trackingId: string;
-  recipient: string;
-  address: string;
-  distance: string;
-  earnings: number;
-  type: 'urgent' | 'nextDay';
-  status: 'pending' | 'accepted' | 'pickedUp' | 'inTransit';
-  eta?: string;
-}
-
-interface Completion {
-  id: string;
-  trackingId: string;
-  recipient: string;
-  distance: string;
-  earnings: number;
-  type: 'urgent' | 'nextDay';
-}
+import { useRiderDashboard } from '../../hooks/useRiderDashboard';
 
 export default function RiderDashboard() {
+  const insets = useSafeAreaInsets();
   const navigation = useNavigation<any>();
   const { t } = useTranslation();
-  const [activeFilter, setActiveFilter] = useState<'all' | 'urgent' | 'nextDay'>('all');
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [stats, setStats] = useState({
-    active: 0,
-    todayEarnings: 0,
-    totalEarnings: 0,
-  });
-  const [deliveries, setDeliveries] = useState<Delivery[]>([]);
-  const [recentCompletions, setRecentCompletions] = useState<Completion[]>([]);
-  const [userName, setUserName] = useState('Rider');
+  
+  const {
+    userName,
+    stats,
+    loading,
+    refreshing,
+    activeFilter,
+    setActiveFilter,
+    filteredDeliveries,
+    recentCompletions,
+    deliveries,
+    counts,
+    onRefresh,
+    isOnline,
+    toggleOnline
+  } = useRiderDashboard();
 
-  // Fetch dashboard data
-  const fetchDashboardData = useCallback(async () => {
-    try {
-      setLoading(true);
-
-      // Fetch user data for name
-      const user = await authApi.getStoredUser();
-      if (user?.fullName) {
-        setUserName(user.fullName);
-      }
-
-      // Fetch active orders
-      const activeOrdersResponse = await riderApi.getActiveOrders();
-      const activeOrders = activeOrdersResponse?.data?.orders || [];
-
-      // Fetch earnings
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const earningsResponse = await riderApi.getEarnings({
-        startDate: today.toISOString(),
-      });
-      const earningsData = earningsResponse?.data || {};
-
-      // Fetch recent completed orders
-      const completedResponse = await riderApi.getCompletedOrders({ limit: 5 });
-      const completedOrders = completedResponse?.data?.shipments || [];
-
-      // Map active orders to delivery format
-      const mappedDeliveries: Delivery[] = activeOrders.map((order: any) => {
-        // Extract recipient name - backend now returns recipientName
-        const recipientName = order.recipientName || order.recipient_name || 'Customer';
-        
-        // Map backend status to frontend status
-        let status: Delivery['status'] = 'pending';
-        if (order.status === 'assigned') status = 'accepted';
-        else if (order.status === 'picked_up' || order.status === 'pickedUp') status = 'pickedUp';
-        else if (order.status === 'in_transit' || order.status === 'inTransit') status = 'inTransit';
-
-        // Determine type based on scheduled delivery time
-        // If scheduled for today or urgent, mark as urgent, otherwise nextDay
-        let type: 'urgent' | 'nextDay' = 'urgent';
-        if (order.scheduledDeliveryTime || order.scheduled_delivery_time) {
-          const scheduledTime = new Date(order.scheduledDeliveryTime || order.scheduled_delivery_time);
-          const tomorrow = new Date();
-          tomorrow.setDate(tomorrow.getDate() + 1);
-          tomorrow.setHours(0, 0, 0, 0);
-          if (scheduledTime >= tomorrow) {
-            type = 'nextDay';
-          }
-        }
-
-        // Calculate distance from distanceKm field or show N/A
-        const distanceKm = order.distanceKm || order.distance_km;
-        const distance = distanceKm ? `${parseFloat(distanceKm).toFixed(1)} km` : 'N/A';
-
-        // Calculate ETA if estimatedDeliveryTime is available
-        const estimatedMinutes = order.estimatedDeliveryTime || order.estimated_delivery_time;
-        const eta = estimatedMinutes ? `${estimatedMinutes} min` : undefined;
-
-        return {
-          id: order.id,
-          trackingId: order.trackingNumber || order.tracking_number || '',
-          recipient: recipientName,
-          address: order.deliveryAddress || order.delivery_address || '',
-          distance,
-          earnings: parseFloat(order.deliveryFee || order.delivery_fee || 0),
-          type,
-          status,
-          eta,
-        };
-      });
-
-      // Map completed orders to completion format
-      const mappedCompletions: Completion[] = completedOrders
-        .slice(0, 5)
-        .map((order: any) => {
-          const recipientName = order.recipientName || order.recipient_name || 'Customer';
-          
-          // Determine type
-          let type: 'urgent' | 'nextDay' = 'urgent';
-          if (order.scheduledDeliveryTime || order.scheduled_delivery_time) {
-            const scheduledTime = new Date(order.scheduledDeliveryTime || order.scheduled_delivery_time);
-            const tomorrow = new Date();
-            tomorrow.setDate(tomorrow.getDate() + 1);
-            tomorrow.setHours(0, 0, 0, 0);
-            if (scheduledTime >= tomorrow) {
-              type = 'nextDay';
-            }
-          }
-
-          // Calculate distance
-          const distanceKm = order.distanceKm || order.distance_km;
-          const distance = distanceKm ? `${parseFloat(distanceKm).toFixed(1)} km` : 'N/A';
-
-          return {
-            id: order.id,
-            trackingId: order.trackingNumber || order.tracking_number || '',
-            recipient: recipientName,
-            distance,
-            earnings: parseFloat(order.deliveryFee || order.delivery_fee || 0),
-            type,
-          };
-        });
-
-      // Calculate stats
-      const activeCount = mappedDeliveries.length;
-      const todayEarnings = parseFloat(earningsData.periodEarnings || earningsData.todayEarnings || 0);
-      const totalEarnings = parseFloat(earningsData.totalEarnings || 0);
-
-      setStats({
-        active: activeCount,
-        todayEarnings,
-        totalEarnings,
-      });
-      setDeliveries(mappedDeliveries);
-      setRecentCompletions(mappedCompletions);
-    } catch (error: any) {
-      console.error('Error fetching dashboard data:', error);
-      Alert.alert(
-        'Error',
-        error.message || 'Failed to load dashboard data. Please try again.',
-        [{ text: 'OK' }]
-      );
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+  // Helper to get badges
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'inTransit': return { label: t('status.inTransit', 'In Transit'), color: colors.success };
+      case 'pickedUp': return { label: t('status.pickedUp', 'Picked Up'), color: colors.success };
+      case 'accepted': return { label: t('status.accepted', 'Accepted'), color: '#2196F3' };
+      default: return { label: t('status.pending', 'Pending'), color: '#FFC107' };
     }
-  }, []);
+  };
 
-  // Fetch data on mount and when screen is focused
-  useEffect(() => {
-    fetchDashboardData();
-  }, [fetchDashboardData]);
+  const getTypeBadge = (type: string) => {
+    return type === 'urgent'
+      ? { label: t('common.urgent', 'URGENT'), color: '#FF6B00' }
+      : { label: t('common.nextDay', 'Next Day'), color: '#2196F3' };
+  };
 
-  useFocusEffect(
-    useCallback(() => {
-      fetchDashboardData();
-    }, [fetchDashboardData])
-  );
-
-  // Pull to refresh
-  const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    fetchDashboardData();
-  }, [fetchDashboardData]);
-
-  const filteredDeliveries = activeFilter === 'all' 
-    ? deliveries 
-    : deliveries.filter(d => d.type === activeFilter);
-
-  const urgentCount = deliveries.filter(d => d.type === 'urgent').length;
-  const nextDayCount = deliveries.filter(d => d.type === 'nextDay').length;
-
-  // Show loading state
+  // Loading State
   if (loading && !refreshing) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={styles.loadingText}>Loading dashboard...</Text>
+        <Text style={styles.loadingText}>{t('dashboard.loading', 'Loading dashboard...')}</Text>
       </View>
     );
   }
 
-  const getStatusBadge = (status: string, type: string) => {
-    if (status === 'inTransit') {
-      return { label: 'In Transit', color: colors.success };
-    }
-    if (status === 'pickedUp') {
-      return { label: 'Picked Up', color: colors.success };
-    }
-    if (status === 'accepted') {
-      return { label: 'Accepted', color: '#2196F3' };
-    }
-    return { label: 'Pending', color: '#FFC107' };
-  };
-
-  const getTypeBadge = (type: string) => {
-    if (type === 'urgent') {
-      return { label: 'URGENT', color: '#FF6B00' };
-    }
-    return { label: 'Next Day', color: '#2196F3' };
-  };
-
   return (
     <View style={styles.container}>
-      {/* Orange Header with Gradient */}
+      {/* Header */}
       <LinearGradient
         colors={['#FF6B00', '#FF8C33']}
-        style={styles.orangeHeader}
+        style={[styles.orangeHeader, { paddingTop: insets.top + spacing.md }]}
       >
         <View style={styles.headerTop}>
           <View>
-            <Text style={styles.welcomeText}>Welcome back, {userName}</Text>
+            <Text style={styles.welcomeText}>
+              {t('dashboard.welcome', 'Welcome back, {{name}}', { name: userName })}
+            </Text>
           </View>
           <TouchableOpacity 
             style={styles.notificationButton}
-            onPress={() => {
-              const parent = navigation.getParent();
-              if (parent) {
-                parent.navigate('Notifications');
-              }
-            }}
+            onPress={() => navigation.navigate('Notifications')}
           >
             <Ionicons name="notifications-outline" size={24} color={colors.textWhite} />
           </TouchableOpacity>
         </View>
 
-        {/* Summary Cards */}
+        {/* Online/Offline Toggle */}
+        {/* Online/Offline Toggle - Modern Design */}
+        <TouchableOpacity 
+          activeOpacity={0.9}
+          onPress={() => toggleOnline(!isOnline)}
+          style={[
+            styles.statusToggleContainer,
+            isOnline ? styles.statusOnline : styles.statusOffline
+          ]}
+        >
+          <View style={styles.statusContent}>
+            <View style={[styles.statusIconCircle, isOnline ? { backgroundColor: 'rgba(255,255,255,0.3)' } : { backgroundColor: 'rgba(0,0,0,0.1)' }]}>
+              <Ionicons 
+                name={isOnline ? "power" : "power-outline"} 
+                size={22} 
+                color={colors.textWhite} 
+              />
+            </View>
+            <View>
+              <Text style={styles.statusLabel}>
+                {isOnline ? 'Active Status' : 'Offline Status'}
+              </Text>
+              <Text style={styles.statusSubtext}>
+                {isOnline ? 'You are visible to dispatch' : 'You are currently hidden'}
+              </Text>
+            </View>
+          </View>
+          
+          <View style={styles.modernSwitch}>
+            <View style={[
+              styles.modernSwitchThumb,
+              isOnline ? styles.switchThumbOn : styles.switchThumbOff
+            ]} />
+          </View>
+        </TouchableOpacity>
+
+        {/* Stats Cards */}
         <View style={styles.summaryCards}>
           <View style={styles.summaryCard}>
             <Ionicons name="time-outline" size={24} color={colors.textWhite} />
             <Text style={styles.summaryNumber}>{stats.active}</Text>
-            <Text style={styles.summaryLabel}>Active</Text>
+            <Text style={styles.summaryLabel}>{t('dashboard.active', 'Active')}</Text>
           </View>
           <View style={styles.summaryCard}>
             <Ionicons name="cash-outline" size={24} color={colors.textWhite} />
-            <Text style={styles.summaryNumber}>${stats.todayEarnings}</Text>
-            <Text style={styles.summaryLabel}>Today</Text>
+            <Text style={styles.summaryNumber}>${stats.todayEarnings.toFixed(1)}</Text>
+            <Text style={styles.summaryLabel}>{t('dashboard.today', 'Today')}</Text>
           </View>
           <View style={styles.summaryCard}>
             <Ionicons name="stats-chart-outline" size={24} color={colors.textWhite} />
-            <Text style={styles.summaryNumber}>${stats.totalEarnings}</Text>
-            <Text style={styles.summaryLabel}>Total</Text>
+            <Text style={styles.summaryNumber}>${stats.totalEarnings.toFixed(1)}</Text>
+            <Text style={styles.summaryLabel}>{t('dashboard.total', 'Total')}</Text>
           </View>
         </View>
       </LinearGradient>
@@ -285,258 +147,238 @@ export default function RiderDashboard() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
         }
       >
-        {/* Route Suggestion Cards */}
+        {/* Route Suggestions */}
+        {/* Route Suggestions */}
         <View style={styles.routeSuggestions}>
-          <TouchableOpacity 
-            style={styles.routeCard}
-            onPress={() => {
-              const parent = navigation.getParent();
-              if (parent) {
-                parent.navigate('RoutePlanning', { routeType: 'urgent' });
-              }
-            }}
-          >
-            <LinearGradient
-              colors={['#F44336', '#FF6B00']}
-              style={styles.routeCardGradient}
+          <Text style={styles.sectionTitle}>{t('dashboard.routes', 'Your Routes')}</Text>
+          <View style={styles.routeCardsContainer}>
+             <TouchableOpacity 
+              style={[styles.routeCard, { backgroundColor: '#FFF3E0' }]}
+              onPress={() => navigation.navigate('RoutePlanning', { routeType: 'urgent' })}
             >
-              <Ionicons name="flash" size={28} color={colors.textWhite} />
-              <View style={styles.routeCardContent}>
-                <Text style={styles.routeCardTitle}>URGENT Route</Text>
-                <Text style={styles.routeCardSubtitle}>{urgentCount} same-day stops</Text>
-                <Text style={styles.routeCardSubtitle}>Priority delivery</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={colors.textWhite} />
-            </LinearGradient>
-          </TouchableOpacity>
+              <LinearGradient 
+                colors={['#FF6B00', '#F57C00']} 
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.routeCardGradient}
+              >
+                <View style={styles.routeIconContainer}>
+                   <Ionicons name="flash" size={24} color={colors.textWhite} />
+                </View>
+                <View style={styles.routeCardContent}>
+                  <Text style={styles.routeCardTitle}>{t('dashboard.urgentRoute', 'URGENT Route')}</Text>
+                  <Text style={styles.routeCardStats}>{counts.urgent} {t('common.stops', 'Stops')}</Text>
+                  <Text style={styles.routeCardSubtitle}>{t('dashboard.priorityDelivery', 'Same-day priority')}</Text>
+                </View>
+                <View style={styles.routeAction}>
+                   <Ionicons name="arrow-forward-circle" size={32} color={colors.textWhite} />
+                </View>
+              </LinearGradient>
+            </TouchableOpacity>
 
-          <TouchableOpacity 
-            style={styles.routeCard}
-            onPress={() => {
-              const parent = navigation.getParent();
-              if (parent) {
-                parent.navigate('RoutePlanning', { routeType: 'nextDay' });
-              }
-            }}
-          >
-            <LinearGradient
-              colors={['#2196F3', '#9C27B0']}
-              style={styles.routeCardGradient}
+            <TouchableOpacity 
+              style={[styles.routeCard, { backgroundColor: '#E3F2FD', marginTop: spacing.sm }]}
+              onPress={() => navigation.navigate('RoutePlanning', { routeType: 'nextDay' })}
             >
-              <Ionicons name="map-outline" size={28} color={colors.textWhite} />
-              <View style={styles.routeCardContent}>
-                <Text style={styles.routeCardTitle}>Next-Day Route</Text>
-                <Text style={styles.routeCardSubtitle}>{nextDayCount} stops</Text>
-                <Text style={styles.routeCardSubtitle}>Standard delivery</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={colors.textWhite} />
-            </LinearGradient>
-          </TouchableOpacity>
+              <LinearGradient 
+                colors={['#42A5F5', '#1E88E5']} 
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.routeCardGradient}
+              >
+                 <View style={styles.routeIconContainer}>
+                   <Ionicons name="calendar" size={24} color={colors.textWhite} />
+                </View>
+                <View style={styles.routeCardContent}>
+                  <Text style={styles.routeCardTitle}>{t('dashboard.nextDayRoute', 'Standard Route')}</Text>
+                  <Text style={styles.routeCardStats}>{counts.nextDay} {t('common.stops', 'Stops')}</Text>
+                   <Text style={styles.routeCardSubtitle}>{t('dashboard.standardDelivery', 'Next-day schedule')}</Text>
+                </View>
+                <View style={styles.routeAction}>
+                   <Ionicons name="arrow-forward-circle" size={32} color={colors.textWhite} />
+                </View>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
         </View>
 
-        {/* Active Deliveries Section */}
+        {/* Active Deliveries */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Active Deliveries</Text>
+            <Text style={styles.sectionTitle}>{t('dashboard.activeDeliveries', 'Active Deliveries')}</Text>
             <View style={styles.activeBadge}>
-              <Text style={styles.activeBadgeText}>{stats.active} Active</Text>
+              <Text style={styles.activeBadgeText}>{t('dashboard.activeCount', '{{count}} Active', { count: stats.active })}</Text>
             </View>
           </View>
 
-          {/* Filter Buttons */}
-          <View style={styles.filterContainer}>
-            <TouchableOpacity
-              style={[
-                styles.filterButton,
-                activeFilter === 'all' && styles.filterButtonActive
-              ]}
-              onPress={() => setActiveFilter('all')}
-            >
-              <Text style={[
-                styles.filterButtonText,
-                activeFilter === 'all' && styles.filterButtonTextActive
-              ]}>
-                All ({deliveries.length})
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.filterButton,
-                activeFilter === 'urgent' && styles.filterButtonActive
-              ]}
-              onPress={() => setActiveFilter('urgent')}
-            >
-              <Ionicons 
-                name="flash" 
-                size={16} 
-                color={activeFilter === 'urgent' ? colors.textWhite : colors.text} 
-              />
-              <Text style={[
-                styles.filterButtonText,
-                activeFilter === 'urgent' && styles.filterButtonTextActive
-              ]}>
-                Urgent ({urgentCount})
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.filterButton,
-                activeFilter === 'nextDay' && styles.filterButtonActive
-              ]}
-              onPress={() => setActiveFilter('nextDay')}
-            >
-              <Text style={[
-                styles.filterButtonText,
-                activeFilter === 'nextDay' && styles.filterButtonTextActive
-              ]}>
-                Next Day ({nextDayCount})
-              </Text>
-            </TouchableOpacity>
+          {/* Filters */}
+          <View style={styles.filterContainerContainer}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterContainer}>
+              {[
+                { key: 'all', label: t('common.all', 'All'), count: deliveries.length, icon: null },
+                { key: 'urgent', label: t('common.urgent', 'Urgent'), count: counts.urgent, icon: 'flash' },
+                { key: 'nextDay', label: t('common.nextDay', 'Next Day'), count: counts.nextDay, icon: null }
+              ].map((filter) => (
+                <TouchableOpacity
+                  key={filter.key}
+                  style={[styles.filterButton, activeFilter === filter.key && styles.filterButtonActive]}
+                  onPress={() => setActiveFilter(filter.key as any)}
+                >
+                  {filter.icon && (
+                    <Ionicons 
+                      name={filter.icon as any} 
+                      size={16} 
+                      color={activeFilter === filter.key ? colors.textWhite : colors.text} 
+                    />
+                  )}
+                  <Text style={[styles.filterButtonText, activeFilter === filter.key && styles.filterButtonTextActive]}>
+                    {filter.label} ({filter.count})
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
           </View>
 
-          {/* Delivery Cards */}
+          {/* List */}
           {filteredDeliveries.length === 0 ? (
             <View style={styles.emptyState}>
               <Ionicons name="cube-outline" size={64} color={colors.textLight} />
-              <Text style={styles.emptyStateText}>No active deliveries</Text>
+              <Text style={styles.emptyStateText}>{t('dashboard.noActive', 'No active deliveries')}</Text>
               <Text style={styles.emptyStateSubtext}>
                 {activeFilter === 'all' 
-                  ? 'You don\'t have any active deliveries at the moment'
-                  : `No ${activeFilter === 'urgent' ? 'urgent' : 'next-day'} deliveries found`}
+                  ? t('dashboard.noDeliveriesMsg', "You don't have any active deliveries at the moment")
+                  : t('dashboard.noFilteredMsg', 'No {{filter}} deliveries found', { filter: activeFilter })}
               </Text>
             </View>
           ) : (
             filteredDeliveries.map((delivery) => {
-            const statusBadge = getStatusBadge(delivery.status, delivery.type);
-            const typeBadge = getTypeBadge(delivery.type);
-            const isActive = delivery.status === 'inTransit' || delivery.status === 'pickedUp';
+              const statusBadge = getStatusBadge(delivery.status);
+              const typeBadge = getTypeBadge(delivery.type);
+              const isActive = ['inTransit', 'pickedUp'].includes(delivery.status);
 
-            return (
-              <TouchableOpacity 
-                key={delivery.id} 
-                style={styles.deliveryCard}
-                onPress={() => {
-                  const parent = navigation.getParent();
-                  if (parent) {
-                    parent.navigate('RiderOrderDetails', { orderId: delivery.id });
-                  }
-                }}
-              >
-                {isActive && (
-                  <View style={styles.deliveryActiveIndicator}>
-                    <Ionicons name="paper-plane" size={16} color={colors.success} />
-                  </View>
-                )}
-                <View style={styles.deliveryHeader}>
-                  <Text style={styles.trackingId}>{delivery.trackingId}</Text>
-                  <View style={styles.badgeContainer}>
-                    <View style={[styles.badge, { backgroundColor: typeBadge.color }]}>
-                      <Text style={styles.badgeText}>{typeBadge.label}</Text>
+              return (
+                <TouchableOpacity 
+                  key={delivery.id} 
+                  style={styles.deliveryCard}
+                  onPress={() => navigation.navigate('RoutePlanning', { routeType: delivery.type })}
+                >
+                  {isActive && (
+                    <View style={styles.deliveryActiveIndicator}>
+                      <Ionicons name="paper-plane" size={16} color={colors.success} />
                     </View>
-                    <View style={[styles.badge, { backgroundColor: statusBadge.color }]}>
-                      <Text style={styles.badgeText}>{statusBadge.label}</Text>
-                    </View>
-                  </View>
-                </View>
-
-                {isActive ? (
-                  <>
-                    <Text style={styles.recipientActive}>To: {delivery.recipient}</Text>
-                    {delivery.eta && (
-                      <View style={styles.etaContainer}>
-                        <Ionicons name="time-outline" size={14} color={colors.textLight} />
-                        <Text style={styles.etaText}>{delivery.eta}</Text>
+                  )}
+                  <View style={styles.deliveryHeader}>
+                    <Text 
+                      style={styles.trackingId} 
+                      numberOfLines={1} 
+                      ellipsizeMode="middle"
+                    >
+                      {delivery.trackingId}
+                    </Text>
+                    <View style={styles.badgeContainer}>
+                      <View style={[styles.badge, { backgroundColor: typeBadge.color }]}>
+                        <Text style={styles.badgeText}>{typeBadge.label}</Text>
                       </View>
-                    )}
-                    <View style={styles.distanceContainerInline}>
-                      <Text style={styles.distance}>{delivery.distance}</Text>
+                      <View style={[styles.badge, { backgroundColor: statusBadge.color }]}>
+                        <Text style={styles.badgeText}>{statusBadge.label}</Text>
+                      </View>
                     </View>
-                    <View style={styles.addressContainer}>
-                      <Ionicons name="location-outline" size={16} color={colors.textLight} />
-                      <Text style={styles.address}>{delivery.address}</Text>
-                    </View>
-                    <View style={styles.actionButtonsContainer}>
-                      <TouchableOpacity style={styles.actionButton}>
-                        <Ionicons name="call" size={18} color={colors.success} />
-                      </TouchableOpacity>
-                      <TouchableOpacity style={styles.actionButton}>
-                        <Ionicons name="chatbubble-outline" size={18} color={colors.info} />
-                      </TouchableOpacity>
-                      <TouchableOpacity style={styles.actionButton}>
-                        <Ionicons name="paper-plane" size={18} color="#1565C0" />
-                      </TouchableOpacity>
-                    </View>
-                    <View style={styles.earningsContainer}>
-                      <Text style={styles.earningsLabel}>Earnings: <Text style={styles.earningsAmount}>${delivery.earnings.toFixed(2)}</Text></Text>
-                    </View>
-                  </>
-                ) : (
-                  <>
-                    <Text style={styles.recipient}>{delivery.recipient}</Text>
-                    <View style={styles.addressContainer}>
-                      <Ionicons name="location-outline" size={16} color={colors.textLight} />
-                      <Text style={styles.address}>{delivery.address}</Text>
-                    </View>
-                    <View style={styles.deliveryFooter}>
-                      <View style={styles.distanceContainer}>
+                  </View>
+
+                  {isActive ? (
+                    <>
+                      <Text style={styles.recipientActive}>{t('common.to', 'To')}: {delivery.recipient}</Text>
+                      {delivery.eta && (
+                        <View style={styles.etaContainer}>
+                          <Ionicons name="time-outline" size={14} color={colors.textLight} />
+                          <Text style={styles.etaText}>{delivery.eta}</Text>
+                        </View>
+                      )}
+                      <View style={styles.distanceContainerInline}>
                         <Text style={styles.distance}>{delivery.distance}</Text>
                       </View>
-                    </View>
-                    <View style={styles.earningsContainer}>
-                      <Text style={styles.earningsAmount}>${delivery.earnings.toFixed(2)}</Text>
-                    </View>
-                  </>
-                )}
-              </TouchableOpacity>
-            );
-          }))}
+                      <View style={styles.addressContainer}>
+                        <Ionicons name="location-outline" size={16} color={colors.textLight} />
+                        <Text style={styles.address}>{delivery.address}</Text>
+                      </View>
+                      <View style={styles.actionButtonsContainer}>
+                        <TouchableOpacity style={styles.actionButton}>
+                          <Ionicons name="call" size={18} color={colors.success} />
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.actionButton}>
+                          <Ionicons name="chatbubble-outline" size={18} color={colors.info} />
+                        </TouchableOpacity>
+                      </View>
+                      <View style={styles.earningsContainer}>
+                        <Text style={styles.earningsLabel}>
+                          {t('common.earnings', 'Earnings')}: <Text style={styles.earningsAmount}>${delivery.earnings.toFixed(2)}</Text>
+                        </Text>
+                      </View>
+                    </>
+                  ) : (
+                    <>
+                      <Text style={styles.recipient}>{delivery.recipient}</Text>
+                      <View style={styles.addressContainer}>
+                        <Ionicons name="location-outline" size={16} color={colors.textLight} />
+                        <Text style={styles.address}>{delivery.address}</Text>
+                      </View>
+                      <View style={styles.deliveryFooter}>
+                        <View style={styles.distanceContainer}>
+                          <Text style={styles.distance}>{delivery.distance}</Text>
+                        </View>
+                      </View>
+                      <View style={styles.earningsContainer}>
+                        <Text style={styles.earningsAmount}>${delivery.earnings.toFixed(2)}</Text>
+                      </View>
+                    </>
+                  )}
+                </TouchableOpacity>
+              );
+            })
+          )}
         </View>
 
-        {/* Recent Completions Section */}
+        {/* Recent Completions */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Recent Completions</Text>
+          <Text style={styles.sectionTitle}>{t('dashboard.recentCompletions', 'Recent Completions')}</Text>
           {recentCompletions.length === 0 ? (
             <View style={styles.emptyState}>
               <Ionicons name="checkmark-circle-outline" size={64} color={colors.textLight} />
-              <Text style={styles.emptyStateText}>No recent completions</Text>
+              <Text style={styles.emptyStateText}>{t('dashboard.noCompletions', 'No recent completions')}</Text>
               <Text style={styles.emptyStateSubtext}>
-                Your completed deliveries will appear here
+                {t('dashboard.completionsMsg', 'Your completed deliveries will appear here')}
               </Text>
             </View>
           ) : (
             recentCompletions.map((completion) => {
-            const typeBadge = getTypeBadge(completion.type);
-            return (
-              <TouchableOpacity 
-                key={completion.id} 
-                style={styles.completionCard}
-                onPress={() => {
-                  const parent = navigation.getParent();
-                  if (parent) {
-                    parent.navigate('RiderOrderDetails', { orderId: completion.id });
-                  }
-                }}
-              >
-                <View style={styles.completionHeader}>
-                  <Text style={styles.trackingId}>{completion.trackingId}</Text>
-                  <View style={styles.badgeContainer}>
-                    <View style={[styles.badge, { backgroundColor: typeBadge.color }]}>
-                      <Text style={styles.badgeText}>Urgent</Text>
+              const typeBadge = getTypeBadge(completion.type);
+              return (
+                <TouchableOpacity 
+                  key={completion.id} 
+                  style={styles.completionCard}
+                  onPress={() => navigation.navigate('RiderOrderDetails', { orderId: completion.id })}
+                >
+                  <View style={styles.completionHeader}>
+                    <Text style={styles.trackingId}>{completion.trackingId}</Text>
+                    <View style={styles.badgeContainer}>
+                      <View style={[styles.badge, { backgroundColor: typeBadge.color }]}>
+                        <Text style={styles.badgeText}>{typeBadge.label}</Text>
+                      </View>
+                      <Ionicons name="checkmark-circle" size={20} color={colors.success} />
                     </View>
-                    <Ionicons name="checkmark-circle" size={20} color={colors.success} />
                   </View>
-                </View>
-                <Text style={styles.recipient}>{completion.recipient}</Text>
-                <View style={styles.completionFooter}>
-                  <Text style={styles.distance}>{completion.distance}</Text>
-                  <Text style={styles.completionEarnings}>+${completion.earnings.toFixed(2)}</Text>
-                </View>
-              </TouchableOpacity>
-            );
-          }))}
+                  <Text style={styles.recipient}>{completion.recipient}</Text>
+                  <View style={styles.completionFooter}>
+                    <Text style={styles.distance}>{completion.distance}</Text>
+                    <Text style={styles.completionEarnings}>+${completion.earnings.toFixed(2)}</Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })
+          )}
         </View>
       </ScrollView>
     </View>
@@ -549,9 +391,10 @@ const styles = StyleSheet.create({
     backgroundColor: colors.backgroundLight,
   },
   orangeHeader: {
-    paddingTop: Platform.OS === 'ios' ? 50 : 30,
     paddingBottom: spacing.xl,
     paddingHorizontal: spacing.lg,
+    borderBottomLeftRadius: 32,
+    borderBottomRightRadius: 32,
   },
   headerTop: {
     flexDirection: 'row',
@@ -567,6 +410,81 @@ const styles = StyleSheet.create({
   notificationButton: {
     padding: spacing.xs,
   },
+  statusToggleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.lg,
+    padding: spacing.md,
+    borderRadius: borderRadius.xl,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  statusOnline: {
+    backgroundColor: '#4CAF50', // Modern green
+    shadowColor: '#4CAF50',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  statusOffline: {
+    backgroundColor: '#37474F', // Dark Slate Grey
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  statusContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  statusIconCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.md,
+  },
+  statusLabel: {
+    color: colors.textWhite,
+    fontSize: typography.fontSize.base,
+    fontWeight: typography.fontWeight.bold,
+    marginBottom: 2,
+  },
+  statusSubtext: {
+    color: colors.textWhite,
+    fontSize: typography.fontSize.xs,
+    opacity: 0.8,
+  },
+  modernSwitch: {
+    width: 50,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(0,0,0,0.2)',
+    padding: 2,
+    justifyContent: 'center',
+  },
+  modernSwitchThumb: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: colors.textWhite,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  switchThumbOn: {
+    alignSelf: 'flex-end',
+  },
+  switchThumbOff: {
+    alignSelf: 'flex-start',
+  },
   summaryCards: {
     flexDirection: 'row',
     gap: spacing.md,
@@ -575,13 +493,18 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: spacing.md,
+    paddingVertical: spacing.lg,
+    paddingHorizontal: spacing.sm,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
   summaryNumber: {
-    fontSize: typography.fontSize['2xl'],
+    fontSize: typography.fontSize.xl,
     fontWeight: typography.fontWeight.bold,
     color: colors.textWhite,
-    marginTop: spacing.xs,
+    marginTop: spacing.sm,
   },
   summaryLabel: {
     fontSize: typography.fontSize.sm,
@@ -597,19 +520,34 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xl,
   },
   routeSuggestions: {
-    gap: spacing.md,
     marginBottom: spacing.xl,
   },
+  routeCardsContainer: {
+    gap: spacing.sm,
+  },
   routeCard: {
-    borderRadius: borderRadius.lg,
+    borderRadius: borderRadius.xl,
     overflow: 'hidden',
-    marginBottom: spacing.sm,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
   },
   routeCardGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: spacing.lg,
-    gap: spacing.md,
+    paddingVertical: spacing.xl,
+  },
+  routeIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.md,
   },
   routeCardContent: {
     flex: 1,
@@ -618,12 +556,22 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.lg,
     fontWeight: typography.fontWeight.bold,
     color: colors.textWhite,
-    marginBottom: spacing.xs,
+    marginBottom: 4,
+  },
+  routeCardStats: {
+    fontSize: typography.fontSize['2xl'],
+    fontWeight: typography.fontWeight.bold,
+    color: colors.textWhite,
+    marginBottom: 2,
   },
   routeCardSubtitle: {
     fontSize: typography.fontSize.sm,
     color: colors.textWhite,
     opacity: 0.9,
+    fontWeight: '500',
+  },
+  routeAction: {
+    paddingLeft: spacing.md,
   },
   section: {
     marginBottom: spacing.xl,
@@ -650,10 +598,13 @@ const styles = StyleSheet.create({
     color: colors.info,
     fontWeight: typography.fontWeight.medium,
   },
+  filterContainerContainer: {
+    marginBottom: spacing.md,
+  },
   filterContainer: {
     flexDirection: 'row',
     gap: spacing.sm,
-    marginBottom: spacing.md,
+    paddingRight: spacing.lg,
   },
   filterButton: {
     flexDirection: 'row',
@@ -699,50 +650,52 @@ const styles = StyleSheet.create({
   deliveryHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: spacing.sm,
-    paddingLeft: 24,
+    gap: spacing.sm,
   },
   trackingId: {
     fontSize: typography.fontSize.base,
     fontWeight: typography.fontWeight.bold,
     color: colors.text,
+    flex: 1,
+    marginRight: spacing.xs,
   },
   badgeContainer: {
     flexDirection: 'row',
     gap: spacing.xs,
     alignItems: 'center',
+    flexShrink: 0,
+    justifyContent: 'flex-end',
   },
   badge: {
-    paddingHorizontal: spacing.sm,
+    paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: borderRadius.sm,
   },
   badgeText: {
-    fontSize: typography.fontSize.xs,
+    fontSize: 10, // Slightly smaller
     color: colors.textWhite,
     fontWeight: typography.fontWeight.bold,
+    textTransform: 'uppercase',
   },
   recipient: {
     fontSize: typography.fontSize.base,
     fontWeight: typography.fontWeight.medium,
     color: colors.text,
     marginBottom: spacing.sm,
-    paddingLeft: 24,
   },
   recipientActive: {
     fontSize: typography.fontSize.base,
     fontWeight: typography.fontWeight.medium,
     color: colors.text,
     marginBottom: spacing.xs,
-    paddingLeft: 24,
   },
   etaContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
     marginBottom: spacing.sm,
-    paddingLeft: 24,
   },
   etaText: {
     fontSize: typography.fontSize.sm,
@@ -753,7 +706,6 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: spacing.xs,
     marginBottom: spacing.md,
-    paddingLeft: 24,
   },
   address: {
     flex: 1,
@@ -766,7 +718,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: spacing.sm,
-    paddingLeft: 24,
   },
   distanceContainer: {
     flexDirection: 'row',
@@ -776,7 +727,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: spacing.sm,
-    paddingLeft: 24,
   },
   distance: {
     fontSize: typography.fontSize.sm,
@@ -786,7 +736,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: spacing.sm,
     marginBottom: spacing.md,
-    paddingLeft: 24,
   },
   actionButtons: {
     flexDirection: 'row',
@@ -801,7 +750,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   earningsContainer: {
-    paddingLeft: 24,
+    // paddingLeft: 24, // removed
   },
   earningsLabel: {
     fontSize: typography.fontSize.sm,

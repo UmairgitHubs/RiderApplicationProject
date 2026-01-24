@@ -7,7 +7,7 @@ export interface Route {
     avatar?: string
   }
   vehicleId: string
-  status: 'Active' | 'Pending' | 'Completed'
+  status: 'Active' | 'Pending' | 'Completed' | 'Draft' | 'Assigned' | 'In Progress'
   progress: number
   pickupCount: number
   deliveryCount: number

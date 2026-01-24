@@ -1,6 +1,7 @@
 
 import prisma from '../config/database';
 import { Prisma } from '@prisma/client';
+import { config } from '../config/env';
 
 export class RouteService {
   /**
@@ -199,7 +200,7 @@ export class RouteService {
       }
     });
 
-    return riders.filter(r => r.routes.length === 0);
+    return riders;
   }
 
   /**
@@ -269,6 +270,36 @@ export class RouteService {
            const batch = hubShipments.slice(shipmentIndex, shipmentIndex + MAX_PER_ROUTE);
            const rider = hubRiders[riderIndex];
 
+           // Prepare Waypoints for Google Maps
+           // Origin: Hub (or first pickup) - keeping simpler: Hub -> Pickups -> Deliveries -> Hub? 
+           // For now: First Pickup -> ... -> Last Delivery
+           let distanceKm = 0;
+           let durationMin = 0;
+
+           if (config.googleMaps.apiKey && batch.length > 0) {
+              const origin = `${batch[0].pickup_latitude},${batch[0].pickup_longitude}`;
+              const dest = `${batch[batch.length - 1].delivery_latitude},${batch[batch.length - 1].delivery_longitude}`;
+              
+              // Waypoints: rest of pickups + deliveries
+              const waypoints: string[] = [];
+              // Add rest of pickups
+              batch.slice(1).forEach(s => {
+                  if (s.pickup_latitude && s.pickup_longitude) waypoints.push(`${s.pickup_latitude},${s.pickup_longitude}`);
+              });
+              // Add all deliveries (except last one which is dest)
+              batch.slice(0, batch.length - 1).forEach(s => {
+                  if (s.delivery_latitude && s.delivery_longitude) waypoints.push(`${s.delivery_latitude},${s.delivery_longitude}`);
+              });
+
+              const metrics = await this.calculateRouteMetrics(origin, dest, waypoints);
+              distanceKm = metrics.distanceKm;
+              durationMin = metrics.durationMin;
+           } else {
+               // Fallback if no API key or empty batch
+               distanceKm = batch.length * 1.5;
+               durationMin = batch.length * 10;
+           }
+
            // Create the Route
            const route = await tx.route.create({
              data: {
@@ -276,8 +307,8 @@ export class RouteService {
                hub_id: hub.id,
                rider_id: rider.id,
                status: 'active', // Direct to active for automation
-               distance_km: batch.length * 1.5, // Mock distance
-               duration_min: batch.length * 10,   // Mock duration
+               distance_km: distanceKm > 0 ? distanceKm : batch.length * 1.5,
+               duration_min: durationMin > 0 ? durationMin : batch.length * 10,
              }
            });
 
@@ -322,6 +353,37 @@ export class RouteService {
         message: `Successfully optimized and deployed ${routesCreated} routes.` 
       };
     });
+  }
+
+  private async calculateRouteMetrics(origin: string, destination: string, waypoints: string[] = []): Promise<{ distanceKm: number, durationMin: number }> {
+      try {
+          const wpStr = waypoints.length > 0 ? `&waypoints=optimize:true|${waypoints.join('|')}` : '';
+          const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin}&destination=${destination}${wpStr}&key=${config.googleMaps.apiKey}`;
+          
+          const response = await fetch(url);
+          const data = await response.json() as any;
+
+          if (data.status === 'OK' && data.routes.length > 0) {
+              const legs = data.routes[0].legs;
+              let totalDistMeters = 0;
+              let totalDurationSeconds = 0;
+
+              for (const leg of legs) {
+                  totalDistMeters += leg.distance.value;
+                  totalDurationSeconds += leg.duration.value;
+              }
+
+              return {
+                  distanceKm: parseFloat((totalDistMeters / 1000).toFixed(1)),
+                  durationMin: Math.round(totalDurationSeconds / 60)
+              };
+          } else {
+              if (data.status !== 'OK') console.warn('Google Maps API Error:', data.status, data.error_message);
+          }
+      } catch (error) {
+          console.error('Failed to calculate route metrics:', error);
+      }
+      return { distanceKm: 0, durationMin: 0 };
   }
 
   private calculateDist(lat1: number, lon1: number, lat2: number, lon2: number) {

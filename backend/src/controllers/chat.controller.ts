@@ -69,9 +69,17 @@ export const sendMessage = asyncHandler(async (req: AuthRequest, res: Response) 
     if (finalRecipientId) {
         io.to(`user:${finalRecipientId}`).emit('chat:new-message', {
             shipmentId,
+            orderId: shipmentId, // Add orderId alias
             message
         });
     }
+
+    // Also emit to the order room (for active listeners)
+    io.to(`order:${shipmentId}`).emit('chat:new-message', {
+        shipmentId,
+        orderId: shipmentId,
+        message
+    });
     
     // Also notify admins of new shipment messages
     io.to('role:admin').emit('chat:new-message', {

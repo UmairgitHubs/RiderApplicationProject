@@ -33,9 +33,11 @@ export const getAllRoutes = asyncHandler(async (req: AuthRequest, res: Response)
           return sum + amount;
       }, 0);
 
-      const formattedStatus = route.status === 'active' ? 'Active' : 
+      const formattedStatus = route.status === 'active' ? 'In Progress' : 
                               route.status === 'completed' ? 'Completed' : 
-                              route.status === 'draft' ? 'Pending' : 
+                              (route.status === 'draft' && !route.rider) ? 'Draft' :
+                              (route.status === 'draft' && route.rider) ? 'Assigned' :
+                              (route.status === 'pending') ? 'Assigned' :
                               route.status.charAt(0).toUpperCase() + route.status.slice(1);
 
       return {
@@ -123,6 +125,21 @@ export const getUnassignedShipments = asyncHandler(async (req: AuthRequest, res:
 });
 
 /**
+ * Update Route Status Manually
+ */
+export const updateRouteStatus = asyncHandler(async (req: AuthRequest, res: Response) => {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    const route = await prisma.route.update({
+        where: { id },
+        data: { status }
+    });
+
+    res.json({ success: true, data: route });
+});
+
+/**
  * Get Available Riders
  */
 export const getAvailableRiders = asyncHandler(async (req: AuthRequest, res: Response) => {
@@ -135,7 +152,8 @@ export const getAvailableRiders = asyncHandler(async (req: AuthRequest, res: Res
         phone: (r as any).user.phone,
         vehicleType: r.vehicle_type,
         rating: r.rating,
-        hubId: r.hub_id
+        hubId: r.hub_id,
+        activeRoutes: r.routes.length
     }));
 
     res.json({ success: true, data: formatted });

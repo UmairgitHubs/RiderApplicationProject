@@ -53,10 +53,16 @@ export const getAvailableOrders = async (req: Request, res: Response) => {
       deliveryAddress: shipment.delivery_address,
       deliveryFee: shipment.delivery_fee,
       codAmount: shipment.cod_amount,
-      distance: null, // TODO: Calculate using coordinates
+      pickupLatitude: shipment.pickup_latitude,
+      pickupLongitude: shipment.pickup_longitude,
+      deliveryLatitude: shipment.delivery_latitude,
+      deliveryLongitude: shipment.delivery_longitude,
+      distance: shipment.distance_km ? `${shipment.distance_km} km` : null, // Use pre-calc if available
       estimatedTime: shipment.estimated_delivery_time,
       merchant: shipment.merchant,
       createdAt: shipment.created_at,
+      packageType: shipment.package_type,
+      packageWeight: shipment.package_weight,
     }));
 
     res.json({
@@ -179,6 +185,114 @@ export const acceptOrder = async (req: Request, res: Response) => {
   }
 };
 
+// Pickup an order
+export const pickupOrder = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.id;
+    const { shipmentId } = req.body;
+
+    const shipment = await prisma.shipment.findUnique({
+      where: { id: shipmentId },
+      include: {
+        route_stops: {
+          include: {
+            route: {
+              select: {
+                rider_id: true
+              }
+            }
+          }
+        }
+      }
+    });
+
+    if (!shipment) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: 'NOT_FOUND',
+          message: 'Shipment not found.',
+        },
+      });
+    }
+
+    // Check if shipment is assigned to the rider via a route
+    const isAssignedViaRoute = shipment.route_stops.some(stop => stop.route.rider_id === userId);
+
+    if (shipment.rider_id !== userId && !isAssignedViaRoute) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'FORBIDDEN',
+          message: 'You are not assigned to this shipment.',
+        },
+      });
+    }
+
+    if (shipment.status !== 'assigned') {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'INVALID_STATUS',
+          message: 'Shipment status must be assigned to pick up.',
+        },
+      });
+    }
+
+    // Update shipment status
+    const updatedShipment = await prisma.shipment.update({
+      where: { id: shipmentId },
+      data: {
+        status: 'picked_up',
+        rider_id: userId, // Ensure rider is assigned if not already
+        // picked_up_at: new Date(), // If this field exists in schema, otherwise skip
+      },
+    });
+
+    // Create tracking entry
+    await prisma.shipmentTracking.create({
+      data: {
+        shipment_id: shipmentId,
+        status: 'picked_up',
+        notes: 'Picked up by rider',
+        updated_by: userId,
+      },
+    });
+
+    // Create notifications
+    // Simple notification logic
+    await prisma.notification.createMany({
+      data: [
+        {
+          user_id: shipment.merchant_id,
+          title: 'Shipment Picked Up',
+          message: `Rider has picked up shipment ${shipment.tracking_number}.`,
+          type: 'delivery',
+          reference_id: shipmentId,
+          reference_type: 'shipment',
+        },
+      ],
+    });
+
+    res.json({
+      success: true,
+      data: {
+        shipment: updatedShipment,
+      },
+      message: 'Order picked up successfully.',
+    });
+  } catch (error: any) {
+    logger.error('Pickup order error:', error);
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'An error occurred while picking up the order.',
+      },
+    });
+  }
+};
+
 // Update rider location
 export const updateLocation = async (req: Request, res: Response) => {
   try {
@@ -277,6 +391,11 @@ export const getActiveOrders = async (req: Request, res: Response) => {
           scheduledDeliveryTime: s.scheduled_delivery_time,
           merchant: s.merchant,
           lastUpdate: s.tracking_history[0]?.created_at,
+          packageType: s.package_type,
+          shipmentType: s.shipment_type,
+          specialInstructions: s.special_instructions,
+          deliveryLatitude: s.delivery_latitude,
+          deliveryLongitude: s.delivery_longitude,
         })),
       },
     });
@@ -300,6 +419,17 @@ export const completeDelivery = async (req: Request, res: Response) => {
 
     const shipment = await prisma.shipment.findUnique({
       where: { id: shipmentId },
+      include: {
+        route_stops: {
+          include: {
+            route: {
+              select: {
+                rider_id: true
+              }
+            }
+          }
+        }
+      }
     });
 
     if (!shipment) {
@@ -312,7 +442,10 @@ export const completeDelivery = async (req: Request, res: Response) => {
       });
     }
 
-    if (shipment.rider_id !== userId) {
+    // Check if shipment is assigned to the rider via a route
+    const isAssignedViaRoute = shipment.route_stops.some(stop => stop.route.rider_id === userId);
+
+    if (shipment.rider_id !== userId && !isAssignedViaRoute) {
       return res.status(403).json({
         success: false,
         error: {
@@ -337,8 +470,16 @@ export const completeDelivery = async (req: Request, res: Response) => {
       where: { id: shipmentId },
       data: {
         status: 'delivered',
+        rider_id: userId, // Ensure rider is marked as the one who delivered it
         actual_delivery_time: new Date(),
         payment_status: Number(shipment.cod_amount) > 0 ? 'pending' : 'paid',
+        // Also update the route stop status if this shipment is part of a route
+        route_stops: {
+          updateMany: {
+            where: { shipment_id: shipmentId },
+            data: { status: 'completed' }
+          }
+        }
       },
     });
 
@@ -466,16 +607,35 @@ export const toggleOnlineStatus = async (req: Request, res: Response) => {
 export const getCompletedOrders = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user?.id;
-    const { page = 1, limit = 20 } = req.query;
+    const { page = 1, limit = 20, startDate, endDate } = req.query;
 
     const skip = (parseInt(page as string) - 1) * parseInt(limit as string);
 
+    const where: any = {
+      status: 'delivered',
+      OR: [
+        { rider_id: userId },
+        { 
+          route_stops: { 
+            some: { 
+              route: { 
+                rider_id: userId 
+              } 
+            } 
+          } 
+        }
+      ]
+    };
+
+    if (startDate || endDate) {
+      where.actual_delivery_time = {};
+      if (startDate) where.actual_delivery_time.gte = new Date(startDate as string);
+      if (endDate) where.actual_delivery_time.lte = new Date(endDate as string);
+    }
+
     const [shipments, total] = await Promise.all([
       prisma.shipment.findMany({
-        where: {
-          rider_id: userId,
-          status: 'delivered',
-        },
+        where,
         skip,
         take: parseInt(limit as string),
         orderBy: { actual_delivery_time: 'desc' },
@@ -490,10 +650,7 @@ export const getCompletedOrders = async (req: Request, res: Response) => {
         },
       }),
       prisma.shipment.count({
-        where: {
-          rider_id: userId,
-          status: 'delivered',
-        },
+        where,
       }),
     ]);
 
@@ -601,6 +758,107 @@ export const getEarnings = async (req: Request, res: Response) => {
       error: {
         code: 'INTERNAL_ERROR',
         message: 'An error occurred while fetching earnings.',
+      },
+    });
+  }
+};
+
+// Get rider's assigned routes
+export const getRiderRoutes = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.id;
+    const { status } = req.query;
+
+    const where: any = {
+      rider_id: userId,
+    };
+
+    if (status) {
+      const statuses = (status as string).split(',');
+      where.status = { in: statuses };
+    } else {
+      where.status = { in: ['active', 'draft', 'pending'] };
+    }
+
+    const routes = await prisma.route.findMany({
+      where,
+      include: {
+        hub: {
+          select: {
+            id: true,
+            name: true,
+            address: true,
+            latitude: true,
+            longitude: true,
+          }
+        },
+        stops: {
+          orderBy: { stop_order: 'asc' },
+          include: {
+            shipment: {
+              select: {
+                id: true,
+                tracking_number: true,
+                recipient_name: true,
+                recipient_phone: true,
+                delivery_address: true,
+                delivery_latitude: true,
+                delivery_longitude: true,
+                status: true,
+                package_type: true,
+                scheduled_delivery_time: true,
+                estimated_delivery_time: true,
+                cod_amount: true,
+                distance_km: true,
+              }
+            }
+          }
+        }
+      },
+      orderBy: { created_at: 'desc' }
+    });
+
+    res.json({
+      success: true,
+      data: {
+        routes: routes.map(route => ({
+          id: route.id,
+          name: route.name,
+          status: route.status,
+          distance: route.distance_km,
+          duration: route.duration_min,
+          hub: route.hub,
+          stops: route.stops.map(stop => ({
+            id: stop.id,
+            stopOrder: stop.stop_order,
+            type: stop.type,
+            status: stop.status,
+            location: stop.location,
+            latitude: stop.latitude,
+            longitude: stop.longitude,
+            shipment: stop.shipment ? {
+              id: stop.shipment.id,
+              trackingNumber: stop.shipment.tracking_number,
+              recipientName: stop.shipment.recipient_name,
+              address: stop.shipment.delivery_address,
+              latitude: stop.shipment.delivery_latitude,
+              longitude: stop.shipment.delivery_longitude,
+              scheduledDeliveryTime: stop.shipment.scheduled_delivery_time,
+              codAmount: stop.shipment.cod_amount,
+              distanceKm: stop.shipment.distance_km,
+            } : null
+          }))
+        }))
+      }
+    });
+
+  } catch (error: any) {
+    logger.error('Get rider routes error:', error);
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'An error occurred while fetching rider routes.',
       },
     });
   }

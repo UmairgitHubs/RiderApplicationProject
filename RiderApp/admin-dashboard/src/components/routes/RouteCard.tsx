@@ -1,9 +1,12 @@
 'use client'
 
 import React, { useState } from 'react'
-import { MoreVertical, Package, Truck, Navigation, Edit, Trash2 } from 'lucide-react'
+import { MoreVertical, Package, Truck, Navigation, Edit, Trash2, PlayCircle } from 'lucide-react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { Route } from '@/types/route'
+import { routesApi } from '@/lib/api/routes'
 import DeleteRouteModal from './DeleteRouteModal'
 import CreateRouteModal from './CreateRouteModal'
 
@@ -14,6 +17,17 @@ interface RouteCardProps {
 export default function RouteCard({ route }: RouteCardProps) {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
+  
+  const queryClient = useQueryClient()
+
+  const updateStatusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: string, status: string }) => routesApi.updateStatus(id, status),
+    onSuccess: () => {
+      toast.success('Route started successfully')
+      queryClient.invalidateQueries({ queryKey: ['routes'] })
+    },
+    onError: () => toast.error('Failed to start route')
+  })
 
   return (
     <>
@@ -24,8 +38,9 @@ export default function RouteCard({ route }: RouteCardProps) {
              <div className="flex items-center gap-3 mb-1.5">
                <h3 className="text-lg font-bold text-gray-900 leading-tight">{route.name}</h3>
                <span className={`px-2.5 py-1 rounded-lg text-[10px] uppercase font-black tracking-widest ${
-                 route.status === 'Active' ? 'bg-green-50 text-green-600' : 
+                 route.status === 'Active' || route.status === 'In Progress' ? 'bg-green-50 text-green-600' : 
                  route.status === 'Completed' ? 'bg-blue-50 text-blue-600' : 
+                 route.status === 'Draft' ? 'bg-gray-100 text-gray-600' :
                  'bg-orange-50 text-[#ED7D31]'
                }`}>
                  {route.status}
@@ -51,6 +66,18 @@ export default function RouteCard({ route }: RouteCardProps) {
                 sideOffset={5}
                 align="end"
               >
+                {(route.status === 'Assigned' || route.status === 'Draft' || route.status === 'Pending') && (
+                  <>
+                    <DropdownMenu.Item 
+                      onClick={() => updateStatusMutation.mutate({ id: route.id, status: 'active' })}
+                      className="flex items-center gap-3 px-3 py-2.5 text-xs font-bold text-green-600 outline-none cursor-pointer hover:bg-green-50 rounded-xl transition-colors"
+                    >
+                      <PlayCircle className="w-4 h-4" />
+                      START ROUTE
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Separator className="h-px bg-gray-50 my-1" />
+                  </>
+                )}
                 <DropdownMenu.Item 
                   onClick={() => setIsEditModalOpen(true)}
                   className="flex items-center gap-3 px-3 py-2.5 text-xs font-bold text-gray-600 outline-none cursor-pointer hover:bg-gray-50 rounded-xl transition-colors"
@@ -124,8 +151,9 @@ export default function RouteCard({ route }: RouteCardProps) {
            <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
               <div 
                 className={`h-full rounded-full transition-all duration-700 ease-out ${
-                  route.status === 'Active' ? 'bg-green-500' : 
+                  route.status === 'Active' || route.status === 'In Progress' ? 'bg-green-500' : 
                   route.status === 'Completed' ? 'bg-blue-500' :
+                  route.status === 'Draft' ? 'bg-gray-300' :
                   'bg-orange-500'
                 }`} 
                 style={{ width: `${route.progress}%` }}

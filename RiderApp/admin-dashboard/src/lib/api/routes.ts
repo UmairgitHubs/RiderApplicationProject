@@ -17,6 +17,10 @@ export const routesApi = {
     const response = await api.patch(`/admin/routes/${id}`, data)
     return response.data
   },
+  updateStatus: async (id: string, status: string) => {
+    const response = await api.patch(`/admin/routes/${id}/status`, { status })
+    return response.data
+  },
   delete: async (id: string) => {
     const response = await api.delete(`/admin/routes/${id}`)
     return response.data

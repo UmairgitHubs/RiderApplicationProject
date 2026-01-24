@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,196 +8,41 @@ import {
   Platform,
   ActivityIndicator,
   RefreshControl,
-  Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, typography, spacing, borderRadius } from '../../theme';
-import { riderApi } from '../../services/api';
-
-interface RouteStop {
-  id: string;
-  trackingId: string;
-  recipient: string;
-  address: string;
-  distance: string;
-  estimatedTime: string;
-  status: 'active' | 'pending' | 'completed';
-  type: 'urgent' | 'nextDay';
-  eta?: string;
-  stopNumber: number;
-}
+import { useRoutePlanning } from '../../hooks/useRoutePlanning';
 
 export default function RoutePlanningScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
-  const initialRouteType = route.params?.routeType || 'urgent';
-  const [routeType, setRouteType] = useState<'urgent' | 'nextDay'>(initialRouteType);
-  
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [stops, setStops] = useState<RouteStop[]>([]);
-  const [currentStopIndex, setCurrentStopIndex] = useState(0);
-  const [routeStats, setRouteStats] = useState({
-    totalStops: 0,
-    totalKm: 0,
-    totalMinutes: 0,
-    completedStops: 0,
-    remainingStops: 0,
-  });
-  const [allActiveOrders, setAllActiveOrders] = useState<any[]>([]);
+  const insets = useSafeAreaInsets();
+  const initialType = route.params?.routeType || 'urgent';
 
-  const fetchRouteData = useCallback(async () => {
-    try {
-      setLoading(true);
+  const {
+      routeType,
+      setRouteType,
+      stops,
+      currentStopIndex,
+      routeStats,
+      loading,
+      refreshing,
+      onRefresh,
+      handleStartNavigation,
+      handleViewFullRoute,
+      stats,
+      isAssignedRoute
+  } = useRoutePlanning(initialType);
 
-      // Fetch active orders
-      const activeOrdersResponse = await riderApi.getActiveOrders();
-      const activeOrders = activeOrdersResponse?.data?.orders || [];
-      setAllActiveOrders(activeOrders);
-
-      // Filter by route type
-      const filteredOrders = activeOrders.filter((order: any) => {
-        if (routeType === 'urgent') {
-          // Urgent orders are typically same-day or have earlier delivery times
-          const scheduledTime = order.scheduledDeliveryTime || order.scheduled_delivery_time;
-          if (scheduledTime) {
-            const scheduled = new Date(scheduledTime);
-            const tomorrow = new Date();
-            tomorrow.setDate(tomorrow.getDate() + 1);
-            tomorrow.setHours(0, 0, 0, 0);
-            return scheduled < tomorrow;
-          }
-          return true; // Default to urgent if no scheduled time
-        } else {
-          // Next-day orders
-          const scheduledTime = order.scheduledDeliveryTime || order.scheduled_delivery_time;
-          if (scheduledTime) {
-            const scheduled = new Date(scheduledTime);
-            const tomorrow = new Date();
-            tomorrow.setDate(tomorrow.getDate() + 1);
-            tomorrow.setHours(0, 0, 0, 0);
-            return scheduled >= tomorrow;
-          }
-          return false;
-        }
-      });
-
-      // Map orders to route stops
-      const mappedStops: RouteStop[] = filteredOrders.map((order: any, index: number) => {
-        const recipientName = order.recipientName || order.recipient_name || 'Customer';
-        const distanceKm = order.distanceKm || order.distance_km;
-        const distance = distanceKm ? `${parseFloat(distanceKm).toFixed(1)} km` : 'N/A';
-        const estimatedMinutes = order.estimatedDeliveryTime || order.estimated_delivery_time || 12;
-        const estimatedTime = `${estimatedMinutes} min`;
-
-        // Determine status
-        let status: RouteStop['status'] = 'pending';
-        if (index === 0) status = 'active';
-        else if (order.status === 'delivered') status = 'completed';
-
-        // Calculate ETA (simplified - would need actual route calculation)
-        const baseTime = new Date();
-        let cumulativeMinutes = 0;
-        for (let i = 0; i <= index; i++) {
-          if (i > 0) cumulativeMinutes += 12; // Travel time between stops
-          cumulativeMinutes += parseInt(estimatedMinutes);
-        }
-        baseTime.setMinutes(baseTime.getMinutes() + cumulativeMinutes);
-        const eta = baseTime.toLocaleTimeString('en-US', { 
-          hour: 'numeric', 
-          minute: '2-digit',
-          hour12: true 
-        });
-
-        return {
-          id: order.id,
-          trackingId: order.trackingNumber || order.tracking_number || '',
-          recipient: recipientName,
-          address: order.deliveryAddress || order.delivery_address || '',
-          distance,
-          estimatedTime,
-          status,
-          type: routeType as 'urgent' | 'nextDay',
-          eta,
-          stopNumber: index + 1,
-        };
-      });
-
-      // Calculate route statistics
-      const totalKm = mappedStops.reduce((sum, stop) => {
-        const km = parseFloat(stop.distance.replace(' km', '')) || 0;
-        return sum + km;
-      }, 0);
-
-      const totalMinutes = mappedStops.reduce((sum, stop) => {
-        return sum + parseInt(stop.estimatedTime.replace(' min', '')) || 0;
-      }, 0) + (mappedStops.length - 1) * 12; // Add travel time between stops
-
-      const completedStops = mappedStops.filter(s => s.status === 'completed').length;
-      const remainingStops = mappedStops.length - completedStops;
-
-      setRouteStats({
-        totalStops: mappedStops.length,
-        totalKm: parseFloat(totalKm.toFixed(1)),
-        totalMinutes,
-        completedStops,
-        remainingStops,
-      });
-
-      setStops(mappedStops);
-      setCurrentStopIndex(0);
-    } catch (error: any) {
-      console.error('Error fetching route data:', error);
-      Alert.alert(
-        'Error',
-        error.message || 'Failed to load route data. Please try again.',
-        [{ text: 'OK' }]
-      );
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [routeType]);
-
-  useEffect(() => {
-    fetchRouteData();
-  }, [fetchRouteData, routeType]);
-
+  // Re-fetch when screen focuses (in case orders changed)
   useFocusEffect(
     useCallback(() => {
-      fetchRouteData();
-    }, [fetchRouteData])
+        onRefresh();
+    }, [])
   );
-
-  const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    fetchRouteData();
-  }, [fetchRouteData]);
-
-  const handleStartNavigation = () => {
-    if (stops.length > 0 && stops[currentStopIndex]) {
-      const currentStop = stops[currentStopIndex];
-      // Navigate to map/navigation screen with current stop details
-      Alert.alert(
-        'Start Navigation',
-        `Starting navigation to ${currentStop.recipient} at ${currentStop.address}`,
-        [{ text: 'OK' }]
-      );
-      // TODO: Integrate with actual navigation service (Google Maps, Apple Maps, etc.)
-    }
-  };
-
-  const handleViewFullRoute = () => {
-    // Navigate to full map view with all stops
-    Alert.alert(
-      'View Full Route',
-      'Opening full route on map with all stops',
-      [{ text: 'OK' }]
-    );
-    // TODO: Navigate to map screen with all stops
-  };
 
   const progressPercentage = routeStats.totalStops > 0
     ? Math.round((routeStats.completedStops / routeStats.totalStops) * 100)
@@ -207,44 +52,19 @@ export default function RoutePlanningScreen() {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={styles.loadingText}>Loading route...</Text>
+        <Text style={styles.loadingText}>Optimizing Route...</Text>
       </View>
     );
   }
 
   const currentStop = stops[currentStopIndex] || stops[0];
-  
-  // Calculate counts from all active orders, not just filtered stops
-  const urgentStops = allActiveOrders.filter((order: any) => {
-    const scheduledTime = order.scheduledDeliveryTime || order.scheduled_delivery_time;
-    if (scheduledTime) {
-      const scheduled = new Date(scheduledTime);
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      tomorrow.setHours(0, 0, 0, 0);
-      return scheduled < tomorrow;
-    }
-    return true; // Default to urgent if no scheduled time
-  }).length;
-  
-  const nextDayStops = allActiveOrders.filter((order: any) => {
-    const scheduledTime = order.scheduledDeliveryTime || order.scheduled_delivery_time;
-    if (scheduledTime) {
-      const scheduled = new Date(scheduledTime);
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      tomorrow.setHours(0, 0, 0, 0);
-      return scheduled >= tomorrow;
-    }
-    return false;
-  }).length;
 
   return (
     <View style={styles.container}>
       {/* Header */}
       <LinearGradient
         colors={['#FF6B00', '#FF8C33']}
-        style={styles.header}
+        style={[styles.header, { paddingTop: insets.top + spacing.md }]}
       >
         <TouchableOpacity
           style={styles.backButton}
@@ -254,7 +74,9 @@ export default function RoutePlanningScreen() {
         </TouchableOpacity>
         <View style={styles.headerContent}>
           <Text style={styles.headerTitle}>Route Planning</Text>
-          <Text style={styles.headerSubtitle}>Optimized delivery routes</Text>
+          <Text style={styles.headerSubtitle}>
+            {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+          </Text>
         </View>
       </LinearGradient>
 
@@ -270,11 +92,7 @@ export default function RoutePlanningScreen() {
         <View style={styles.routeSelectionCards}>
           <TouchableOpacity
             style={[styles.routeSelectionCard, routeType === 'urgent' && styles.routeSelectionCardActive]}
-            onPress={() => {
-              if (routeType !== 'urgent') {
-                setRouteType('urgent');
-              }
-            }}
+            onPress={() => setRouteType('urgent')}
           >
             <View style={[
               styles.routeSelectionCardGradient,
@@ -302,18 +120,14 @@ export default function RoutePlanningScreen() {
                 styles.routeSelectionCardSubtext,
                 { color: colors.textLight }
               ]}>
-                {urgentStops} stops
+                {stats?.urgent || 0} stops
               </Text>
             </View>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={[styles.routeSelectionCard, routeType === 'nextDay' && styles.routeSelectionCardActive]}
-            onPress={() => {
-              if (routeType !== 'nextDay') {
-                setRouteType('nextDay');
-              }
-            }}
+            onPress={() => setRouteType('nextDay')}
           >
             <LinearGradient
               colors={routeType === 'nextDay' ? ['#2196F3', '#42A5F5'] : ['#FFFFFF', '#F5F5F5']}
@@ -334,7 +148,7 @@ export default function RoutePlanningScreen() {
                 styles.routeSelectionCardSubtext,
                 routeType === 'nextDay' && styles.routeSelectionCardSubtextActive
               ]}>
-                {nextDayStops} stops
+                {stats?.nextDay || 0} stops
               </Text>
             </LinearGradient>
           </TouchableOpacity>
@@ -354,6 +168,11 @@ export default function RoutePlanningScreen() {
             <Text style={styles.routeOverviewTitle}>
               {routeType === 'urgent' ? 'URGENT Same-Day Route' : 'Next-Day Route'}
             </Text>
+            {isAssignedRoute && (
+                <View style={styles.adminBadge}>
+                    <Text style={styles.adminBadgeText}>ASSIGNED</Text>
+                </View>
+            )}
           </View>
 
           <View style={styles.routeStatsRow}>
@@ -387,14 +206,14 @@ export default function RoutePlanningScreen() {
             </View>
           </View>
 
-          {routeType === 'urgent' ? (
+          {routeType === 'urgent' && (
             <View style={styles.priorityMessage}>
               <Ionicons name="flash" size={16} color={colors.textWhite} />
               <Text style={styles.priorityText}>
                 Priority: Complete all urgent deliveries by end of day.
               </Text>
             </View>
-          ) : null}
+          )}
         </LinearGradient>
 
         {/* Current Stop Card */}
@@ -409,12 +228,12 @@ export default function RoutePlanningScreen() {
             </View>
 
             <View style={styles.badgeContainer}>
-              {currentStop.type === 'urgent' ? (
+              {currentStop.type === 'urgent' && (
                 <View style={[styles.badge, styles.urgentBadge]}>
                   <Ionicons name="flash" size={12} color={colors.textWhite} />
                   <Text style={styles.badgeText}>URGENT</Text>
                 </View>
-              ) : null}
+              )}
               <View style={[styles.badge, styles.statusBadge]}>
                 <Text style={styles.badgeText}>
                   {currentStop.status === 'active' ? 'ACTIVE' : 'PENDING'}
@@ -445,14 +264,14 @@ export default function RoutePlanningScreen() {
 
             <TouchableOpacity
               style={styles.startNavigationButton}
-              onPress={handleStartNavigation}
+              onPress={() => navigation.navigate('RiderOrderDetails', { orderId: currentStop.id })}
             >
               <LinearGradient
                 colors={currentStop.type === 'urgent' ? ['#F44336', '#FF6B00'] : ['#2196F3', '#42A5F5']}
                 style={styles.startNavigationButtonGradient}
               >
-                <Ionicons name="paper-plane" size={20} color={colors.textWhite} />
-                <Text style={styles.startNavigationButtonText}>Start Navigation</Text>
+                <Ionicons name="document-text-outline" size={20} color={colors.textWhite} />
+                <Text style={styles.startNavigationButtonText}>View Order Details</Text>
               </LinearGradient>
             </TouchableOpacity>
           </View>
@@ -521,7 +340,7 @@ export default function RoutePlanningScreen() {
           <View style={styles.statRow}>
             <View style={styles.statItem}>
               <Ionicons name="checkmark-circle" size={20} color={colors.success} />
-              <Text style={styles.statLabel}>Completed Stops</Text>
+              <Text style={styles.routeStatLabel}>Completed Stops</Text>
             </View>
             <Text style={styles.statValue}>{routeStats.completedStops}</Text>
           </View>
@@ -529,7 +348,7 @@ export default function RoutePlanningScreen() {
           <View style={styles.statRow}>
             <View style={styles.statItem}>
               <Ionicons name="cube-outline" size={20} color={colors.primary} />
-              <Text style={styles.statLabel}>Remaining Stops</Text>
+              <Text style={styles.routeStatLabel}>Remaining Stops</Text>
             </View>
             <Text style={styles.statValue}>{routeStats.remainingStops}</Text>
           </View>
@@ -537,7 +356,7 @@ export default function RoutePlanningScreen() {
           <View style={styles.statRow}>
             <View style={styles.statItem}>
               <Ionicons name="stats-chart-outline" size={20} color="#9C27B0" />
-              <Text style={styles.statLabel}>Route Efficiency</Text>
+              <Text style={styles.routeStatLabel}>Route Efficiency</Text>
             </View>
             <Text style={[styles.statValue, { color: '#9C27B0' }]}>Optimized</Text>
           </View>
@@ -561,9 +380,9 @@ export default function RoutePlanningScreen() {
               {routeType === 'urgent' ? 'Priority Same-Day Route' : 'Next-Day Route'}
             </Text>
             <Text style={styles.priorityInfoText}>
-              {routeType === 'urgent' 
-                ? 'This route contains urgent same-day deliveries that must be completed by end of day. Complete these deliveries first before starting next-day route.'
-                : 'This route has been optimized by the hub to minimize distance and maximize efficiency. These deliveries can be completed tomorrow.'}
+               {routeType === 'urgent' 
+                ? 'This route contains urgent same-day deliveries optimized for minimum travel.'
+                : 'This route has been optimized for efficiency. These deliveries can be completed tomorrow.'}
             </Text>
           </View>
         </View>
@@ -603,7 +422,6 @@ const styles = StyleSheet.create({
     color: colors.textLight,
   },
   header: {
-    paddingTop: Platform.OS === 'ios' ? 50 : 30,
     paddingBottom: spacing.lg,
     paddingHorizontal: spacing.lg,
   },
@@ -635,9 +453,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: spacing.md,
     marginBottom: spacing.lg,
+    flexWrap: 'wrap',
   },
   routeSelectionCard: {
     flex: 1,
+    minWidth: 140, // Ensure cards don't get too squashed
     borderRadius: borderRadius.md,
     overflow: 'hidden',
   },
@@ -671,6 +491,20 @@ const styles = StyleSheet.create({
     color: colors.textWhite,
     opacity: 0.9,
   },
+  urgentBadgeInCard: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: '#FFEBEE',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  urgentBadgeInCardText: {
+    fontSize: 8,
+    color: '#F44336',
+    fontWeight: 'bold',
+  },
   routeOverviewCard: {
     borderRadius: borderRadius.lg,
     padding: spacing.lg,
@@ -686,6 +520,7 @@ const styles = StyleSheet.create({
     fontWeight: typography.fontWeight.bold,
     color: colors.textWhite,
     marginLeft: spacing.sm,
+    flex: 1, // Allow text to wrap and not push badge out
   },
   routeStatsRow: {
     flexDirection: 'row',
@@ -735,26 +570,25 @@ const styles = StyleSheet.create({
   progressBarContainer: {
     height: 8,
     backgroundColor: 'rgba(255, 255, 255, 0.3)',
-    borderRadius: borderRadius.full,
+    borderRadius: 4,
     overflow: 'hidden',
   },
   progressBar: {
     height: '100%',
     backgroundColor: colors.textWhite,
-    borderRadius: borderRadius.full,
   },
   priorityMessage: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: spacing.md,
+    backgroundColor: 'rgba(0,0,0,0.1)',
     padding: spacing.sm,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderRadius: borderRadius.md,
+    borderRadius: borderRadius.sm,
+    marginTop: spacing.sm,
   },
   priorityText: {
-    fontSize: typography.fontSize.sm,
-    color: colors.textWhite,
     marginLeft: spacing.xs,
+    color: colors.textWhite,
+    fontSize: typography.fontSize.xs,
     flex: 1,
   },
   currentStopCard: {
@@ -762,28 +596,18 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.lg,
     padding: spacing.lg,
     marginBottom: spacing.lg,
-    borderWidth: 2,
-    borderColor: '#F44336',
-  },
-  urgentBadgeInCard: {
-    position: 'absolute',
-    top: spacing.xs,
-    right: spacing.xs,
-    backgroundColor: '#F44336',
-    paddingHorizontal: spacing.xs,
-    paddingVertical: 2,
-    borderRadius: borderRadius.sm,
-  },
-  urgentBadgeInCardText: {
-    fontSize: typography.fontSize.xs,
-    color: colors.textWhite,
-    fontWeight: typography.fontWeight.bold,
+    borderLeftWidth: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   currentStopHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: spacing.md,
+    marginBottom: spacing.xs,
   },
   currentStopTitle: {
     fontSize: typography.fontSize.lg,
@@ -791,65 +615,85 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   currentStopNumber: {
-    fontSize: typography.fontSize.base,
+    fontSize: typography.fontSize.sm,
     color: colors.textLight,
+    fontWeight: typography.fontWeight.medium,
   },
   badgeContainer: {
     flexDirection: 'row',
     gap: spacing.xs,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.md,
   },
   badge: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
-    borderRadius: borderRadius.sm,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: borderRadius.sm,
   },
   urgentBadge: {
     backgroundColor: '#F44336',
   },
-  statusBadge: {
-    backgroundColor: '#FFC107',
-  },
   urgentBadgeSmall: {
-    backgroundColor: '#FF6B00',
+    backgroundColor: '#FFEBEE',
+  },
+  statusBadge: {
+    backgroundColor: '#2196F3',
   },
   activeBadge: {
-    backgroundColor: colors.success,
+    backgroundColor: '#E3F2FD',
   },
   badgeText: {
-    fontSize: typography.fontSize.xs,
     color: colors.textWhite,
+    fontSize: 10,
     fontWeight: typography.fontWeight.bold,
+    marginLeft: 4,
   },
   badgeTextSmall: {
-    fontSize: typography.fontSize.xs,
-    color: colors.textWhite,
+    color: colors.text,
+    fontSize: 10,
     fontWeight: typography.fontWeight.bold,
   },
+  adminBadge: {
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+    marginLeft: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.4)',
+  },
+  adminBadgeText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: colors.textWhite,
+    letterSpacing: 0.5,
+  },
   trackingId: {
-    fontSize: typography.fontSize.base,
+    fontSize: typography.fontSize.xl,
     fontWeight: typography.fontWeight.bold,
     color: colors.text,
     marginBottom: spacing.md,
+    letterSpacing: 1,
   },
   addressSection: {
     flexDirection: 'row',
     marginBottom: spacing.md,
+    backgroundColor: colors.backgroundLight,
+    padding: spacing.md,
+    borderRadius: borderRadius.md,
   },
   addressContent: {
     flex: 1,
     marginLeft: spacing.sm,
   },
   addressLabel: {
-    fontSize: typography.fontSize.sm,
+    fontSize: typography.fontSize.xs,
     color: colors.textLight,
-    marginBottom: spacing.xs,
+    marginBottom: 2,
   },
   addressText: {
-    fontSize: typography.fontSize.base,
+    fontSize: typography.fontSize.sm,
     color: colors.text,
     lineHeight: 20,
   },
@@ -861,11 +705,16 @@ const styles = StyleSheet.create({
   etaItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
+    backgroundColor: '#F5F5F5',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: borderRadius.sm,
   },
   etaText: {
     fontSize: typography.fontSize.sm,
     color: colors.text,
+    marginLeft: spacing.xs,
+    fontWeight: typography.fontWeight.medium,
   },
   startNavigationButton: {
     borderRadius: borderRadius.md,
@@ -876,12 +725,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: spacing.md,
-    gap: spacing.sm,
   },
   startNavigationButtonText: {
+    color: colors.textWhite,
     fontSize: typography.fontSize.base,
     fontWeight: typography.fontWeight.bold,
-    color: colors.textWhite,
+    marginLeft: spacing.sm,
   },
   allStopsCard: {
     backgroundColor: colors.background,
@@ -893,10 +742,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: spacing.md,
+    marginBottom: spacing.lg,
   },
   allStopsTitle: {
-    fontSize: typography.fontSize.xl,
+    fontSize: typography.fontSize.lg,
     fontWeight: typography.fontWeight.bold,
     color: colors.text,
   },
@@ -905,58 +754,62 @@ const styles = StyleSheet.create({
     color: colors.textLight,
   },
   stopItem: {
-    marginBottom: spacing.md,
+    marginBottom: spacing.lg, // Space for the vertical line
   },
   stopItemLeft: {
     flexDirection: 'row',
   },
   stopCircle: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
     borderWidth: 2,
-    borderColor: colors.border,
+    borderColor: colors.textLight,
+    backgroundColor: colors.background,
+    marginTop: 6,
+    marginLeft: 6,
   },
   stopItemContent: {
     flex: 1,
-    marginLeft: spacing.md,
+    marginLeft: spacing.lg,
   },
   stopItemHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
     marginBottom: spacing.xs,
+    gap: spacing.xs,
   },
   stopNumber: {
-    fontSize: typography.fontSize.base,
+    fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.bold,
     color: colors.text,
   },
   stopTime: {
-    fontSize: typography.fontSize.sm,
-    color: colors.textLight,
-    marginBottom: spacing.xs,
+    fontSize: typography.fontSize.base,
+    fontWeight: typography.fontWeight.bold,
+    color: colors.primary,
+    marginBottom: 2,
   },
   stopTrackingId: {
-    fontSize: typography.fontSize.sm,
-    color: colors.text,
-    fontWeight: typography.fontWeight.medium,
+    fontSize: typography.fontSize.xs,
+    color: colors.textLight,
     marginBottom: spacing.xs,
   },
   stopAddressRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
-    marginBottom: spacing.xs,
   },
   stopRecipient: {
-    flex: 1,
     fontSize: typography.fontSize.sm,
     color: colors.text,
+    flex: 1,
   },
   stopNextDistance: {
+    marginTop: spacing.sm,
     fontSize: typography.fontSize.xs,
     color: colors.textLight,
+    fontStyle: 'italic',
   },
   statsCard: {
     backgroundColor: colors.background,
@@ -965,7 +818,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   statsTitle: {
-    fontSize: typography.fontSize.xl,
+    fontSize: typography.fontSize.base,
     fontWeight: typography.fontWeight.bold,
     color: colors.text,
     marginBottom: spacing.md,
@@ -981,69 +834,64 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
   },
-  statLabel: {
-    fontSize: typography.fontSize.base,
-    color: colors.text,
-  },
   statValue: {
     fontSize: typography.fontSize.lg,
     fontWeight: typography.fontWeight.bold,
     color: colors.text,
   },
   priorityInfoCard: {
-    backgroundColor: '#FFEBEE',
-    borderRadius: borderRadius.lg,
-    padding: spacing.lg,
-    marginBottom: spacing.lg,
     flexDirection: 'row',
+    backgroundColor: '#FFEBEE', // Urgent color
+    padding: spacing.md,
+    borderRadius: borderRadius.md,
+    marginBottom: spacing.lg,
   },
   priorityInfoCardNextDay: {
     backgroundColor: '#E3F2FD',
-  },
-  priorityInfoTitleNextDay: {
-    color: '#2196F3',
   },
   priorityInfoContent: {
     flex: 1,
     marginLeft: spacing.md,
   },
   priorityInfoTitle: {
-    fontSize: typography.fontSize.base,
+    fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.bold,
-    color: '#F44336',
-    marginBottom: spacing.xs,
+    color: '#D32F2F',
+    marginBottom: 2,
+  },
+  priorityInfoTitleNextDay: {
+    color: '#1976D2',
   },
   priorityInfoText: {
-    fontSize: typography.fontSize.sm,
+    fontSize: typography.fontSize.xs,
     color: colors.text,
-    lineHeight: 20,
+    lineHeight: 18,
   },
   viewFullRouteButton: {
-    borderRadius: borderRadius.md,
+    marginBottom: spacing.xl,
+    borderRadius: borderRadius.lg,
     overflow: 'hidden',
-    marginBottom: spacing.lg,
   },
   viewFullRouteButtonGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: spacing.md,
-    gap: spacing.sm,
+    padding: spacing.md,
   },
   viewFullRouteButtonText: {
+    color: colors.textWhite,
     fontSize: typography.fontSize.base,
     fontWeight: typography.fontWeight.bold,
-    color: colors.textWhite,
+    marginLeft: spacing.sm,
   },
   emptyState: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: spacing.xl,
+    paddingVertical: spacing.xl * 2,
   },
   emptyStateText: {
-    fontSize: typography.fontSize.base,
-    color: colors.textLight,
     marginTop: spacing.md,
+    fontSize: typography.fontSize.lg,
+    color: colors.textLight,
   },
 });
-

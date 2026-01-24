@@ -92,41 +92,65 @@ export default function ChatScreen() {
     };
   }, []);
 
-  // Initialize Data
+  // Load User Data
   useEffect(() => {
-    const init = async () => {
+    const loadUser = async () => {
       try {
         const userData = await AsyncStorage.getItem('@user_data');
-        let userId = currentUserId;
-        
         if (userData) {
           const user = JSON.parse(userData);
-          userId = user.id;
-          setCurrentUserId(userId);
+          setCurrentUserId(user.id);
         }
+      } catch (e) {
+        console.error('Failed to load user', e);
+      }
+    };
+    loadUser();
+  }, []);
 
-        if (shipmentId) {
+  const fetchMessages = async () => {
+      if (!shipmentId) return;
+      try {
           const response = await chatApi.getShipmentMessages(shipmentId);
           if (response.success) {
             const formatted: Message[] = response.data.map((m: any) => ({
               id: m.id,
-              text: m.content,
-              sender: (m.sender_id === userId || m.senderId === userId) ? 'me' : 'other',
+              text: m.content || m.text,
+              sender: (String(m.sender_id) === String(currentUserId) || String(m.senderId) === String(currentUserId)) ? 'me' : 'other',
               time: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
               createdAt: m.created_at
             }));
-            setMessages(formatted.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+            
+            // Merge with existing to avoid jitter, or just replace?
+            // Replacing is cleaner for sync, but we want to keep optimistic msgs?
+            // Simple replace is safest for "History Sync".
+            // But we must preserve "pending" messages that are not in backend yet.
+            
+            setMessages(prev => {
+                const pending = prev.filter(m => m.id.toString().startsWith('temp-'));
+                const newIds = new Set(formatted.map(m => m.id));
+                const uniquePending = pending.filter(p => !newIds.has(p.id)); // Should typically be all pending
+                
+                // Sort combined
+                const combined = [...formatted, ...uniquePending].sort((a, b) => 
+                    new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+                );
+                return combined;
+            });
           }
-          await chatApi.markShipmentRead(shipmentId);
-        }
       } catch (err) {
-        console.error('Chat Init Error:', err);
+          console.error('Polling Errosr:', err);
       } finally {
         setLoading(false);
       }
-    };
-    init();
-  }, [shipmentId]);
+  };
+
+  // Initial Load + Polling
+  useEffect(() => {
+    fetchMessages();
+    const interval = setInterval(fetchMessages, 10000); // Poll every 10s
+    return () => clearInterval(interval);
+  }, [shipmentId, currentUserId]);
 
   // Socket setup
   useEffect(() => {
@@ -134,18 +158,57 @@ export default function ChatScreen() {
     const setupSocket = async () => {
       socket = await socketService.connect();
       if (socket) {
-        socket.emit('join_order', { orderId: shipmentId });
+        const joinRoom = () => {
+            console.log('🔌 Joining Order Room:', shipmentId);
+            socket.emit('join_order', { orderId: shipmentId });
+        };
+
+        if (socket.connected) joinRoom();
+        
+        socket.on('connect', joinRoom); // Re-join on reconnect
 
         socket.on('chat:new-message', (data: any) => {
           if (data.orderId === shipmentId || data.shipmentId === shipmentId) {
-            const m = data.message;
+             // ... existing logic ...
+             const m = data.message;
+             // ... existing dedupe logic ...
+             // (Keeping the logic I just added in previous turn)
+             
+            console.log('📩 New Message Received:', { 
+                id: m.id, 
+                senderId: m.senderId || m.sender_id, 
+                currentUserId, 
+                content: m.content 
+            });
+
             setMessages(prev => {
+              // 1. Exact ID check
               if (prev.some(msg => msg.id === m.id)) return prev;
+
+              // 2. Fuzzy Deduplication (Content Match + Pending)
+              const pendingIndex = prev.findIndex(msg => 
+                msg.id.toString().startsWith('temp-') && 
+                msg.text === (m.content || m.text)
+              );
+
+              if (pendingIndex !== -1) {
+                const newMsgs = [...prev];
+                newMsgs[pendingIndex] = {
+                    ...newMsgs[pendingIndex],
+                    id: m.id,
+                    sender: 'me',
+                    createdAt: m.created_at || m.createdAt,
+                    time: new Date(m.created_at || m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                };
+                return newMsgs;
+              }
+
+              const isMe = (String(m.sender_id) === String(currentUserId) || String(m.senderId) === String(currentUserId));
               
               const newMessage: Message = {
                 id: m.id,
                 text: m.content || m.text,
-                sender: (m.sender_id === currentUserId || m.senderId === currentUserId) ? 'me' : 'other',
+                sender: isMe ? 'me' : 'other',
                 time: new Date(m.created_at || m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                 createdAt: m.created_at || m.createdAt
               };
@@ -163,6 +226,7 @@ export default function ChatScreen() {
     return () => {
       if (socket) {
         socket.off('chat:new-message');
+        socket.off('connect'); // Cleanup listener
       }
     };
   }, [shipmentId, currentUserId]);

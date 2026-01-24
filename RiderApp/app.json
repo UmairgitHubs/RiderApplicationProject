@@ -15,6 +15,11 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.codexpress.app",
+      "config": {
+        "googleMaps": {
+          "apiKey": "${EXPO_PUBLIC_GOOGLE_MAPS_KEY}"
+        }
+      },
       "infoPlist": {
         "NSMicrophoneUsageDescription": "This app requires microphone access to make voice calls between riders and merchants.",
         "UIBackgroundModes": [
@@ -29,7 +34,12 @@
       "package": "com.codexpress.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#ffffff",
+        "config": {
+          "googleMaps": {
+            "apiKey": "${EXPO_PUBLIC_GOOGLE_MAPS_KEY}"
+          }
+        }
       },
       "permissions": [
         "RECORD_AUDIO",

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
   View,
   Text,
@@ -6,93 +6,136 @@ import {
   ScrollView,
   TouchableOpacity,
   Platform,
-  Linking,
+  ActivityIndicator,
   Alert,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, typography, spacing, borderRadius } from '../../theme';
+import { useRiderOrderDetails } from '../../hooks/useRiderOrderDetails';
 
 export default function RiderOrderDetailsScreen({ navigation, route }: any) {
-  const [orderStatus, setOrderStatus] = useState<'assigned' | 'arrived-pickup' | 'picked-up' | 'arrived-delivery' | 'delivered'>('assigned');
+  const { orderId } = route.params || {};
+  const insets = useSafeAreaInsets();
+  
+  const {
+    order,
+    isLoading,
+    error,
+    handleCall,
+    handleNavigate,
+    buttonAction,
+    isProcessing,
+    refetch
+  } = useRiderOrderDetails(orderId);
 
-  const order = {
-    trackingId: 'CE2024001234567',
-    earnings: 45.99,
-    merchantName: 'Tech Store NYC',
-    merchantPhone: '+1 (555) 123-4567',
-    pickupAddress: '123 Main St, Manhattan, NY 10001',
-    deliveryAddress: '456 Park Ave, Brooklyn, NY 11201',
-    recipientName: 'Sarah Johnson',
-    recipientPhone: '+1 (555) 987-6543',
-    itemType: 'Electronics',
-    itemWeight: '2.5 kg',
-    packageSize: 'Medium',
-    declaredValue: '$100.00',
-    distance: '2.3 km',
-    estimatedTime: '18 min',
-    specialInstructions: 'Please handle with care. Fragile items inside.',
-    orderTime: 'Dec 1, 2024 - 08:30 AM',
-    pickupTime: 'Dec 1, 2024 - 09:15 AM',
-    estimatedDelivery: 'Dec 1, 2024 - 11:00 AM',
-  };
-
-  const handleCall = (phoneNumber: string, name: string) => {
-    Alert.alert(
-      `Call ${name}`,
-      phoneNumber,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Call', onPress: () => Linking.openURL(`tel:${phoneNumber}`) },
-      ]
+  if (isLoading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={styles.loadingText}>Loading order details...</Text>
+      </View>
     );
+  }
+
+  if (error || !order) {
+    return (
+      <View style={styles.errorContainer}>
+        <Ionicons name="alert-circle-outline" size={64} color={colors.error} />
+        <Text style={styles.errorText}>Failed to load order</Text>
+        <TouchableOpacity style={styles.retryButton} onPress={() => refetch()}>
+          <Text style={styles.retryButtonText}>Retry</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  // Map backend fields to UI fields
+  const displayOrder = {
+    trackingId: order.tracking_number,
+    earnings: Number(order.delivery_fee),
+    merchantName: order.merchant?.full_name || order.merchant?.business_name || 'Merchant',
+    merchantPhone: order.merchant?.phone || '',
+    pickupAddress: order.pickup_address,
+    deliveryAddress: order.delivery_address,
+    recipientName: order.recipient_name,
+    recipientPhone: order.recipient_phone,
+    itemType: order.package_type || order.shipment_type || 'Package',
+    itemWeight: order.package_weight ? `${order.package_weight} kg` : 'N/A',
+    packageSize: order.packages?.[0]?.package_size || 'Standard',
+    declaredValue: order.package_value ? `$${order.package_value}` : 'N/A',
+    distance: order.distance_km ? `${order.distance_km} km` : 'N/A',
+    estimatedTime: order.estimated_delivery_time ? `${order.estimated_delivery_time} min` : 'N/A',
+    specialInstructions: order.special_instructions || order.notes,
+    orderTime: new Date(order.created_at).toLocaleString(),
+    estimatedDelivery: order.scheduled_delivery_time 
+       ? new Date(order.scheduled_delivery_time).toLocaleString()
+       : new Date(Date.now() + 2 * 60 * 60 * 1000).toLocaleString(), // Fallback estimate
   };
 
-  const handleNavigate = (address: string) => {
-    const url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}`;
-    Linking.openURL(url);
-  };
+  // Build Dynamic Timeline
+  const trackingHistory = order.tracking_history || [];
+  const timelineEvents = [
+    {
+      title: 'Order Placed',
+      time: new Date(order.created_at).toLocaleString(),
+      icon: 'time-outline',
+      description: 'Order created by merchant'
+    }
+  ];
 
-  const handleStatusUpdate = () => {
-    const statusFlow: any = {
-      'assigned': 'arrived-pickup',
-      'arrived-pickup': 'picked-up',
-      'picked-up': 'arrived-delivery',
-      'arrived-delivery': 'delivered',
-    };
+  // Add history events
+  trackingHistory.slice().reverse().forEach((event: any) => {
+    if (event.status === 'pending') return; // Skip pending if it's just creation
+    
+    let title = '';
+    let icon: any = 'ellipse-outline';
+    
+    switch(event.status) {
+        case 'assigned': title = 'Assigned to Rider'; icon = 'person-outline'; break; // Could be "You" if we check ID but "Rider" is safe
+        case 'picked_up': title = 'Picked Up'; icon = 'cube-outline'; break;
+        case 'in_transit': title = 'In Transit'; icon = 'navigate-outline'; break;
+        case 'delivered': title = 'Delivered'; icon = 'checkmark-circle-outline'; break;
+        default: title = event.status;
+    }
 
-    if (orderStatus === 'delivered') {
-      navigation.goBack();
-    } else {
-      setOrderStatus(statusFlow[orderStatus]);
+    if (title) {
+        timelineEvents.push({
+            title,
+            time: new Date(event.created_at).toLocaleString(),
+            icon,
+            description: event.location_address || event.notes
+        });
+    }
+  });
+
+  // If not delivered, show Estimated Delivery at the end
+  if (order.status !== 'delivered') {
+    timelineEvents.push({
+        title: 'Estimated Delivery',
+        time: displayOrder.estimatedDelivery,
+        icon: 'flag-outline',
+        description: `${displayOrder.distance} • ${displayOrder.estimatedTime}`
+    });
+  }
+
+  const getStepStatus = () => {
+    switch(order.status) {
+        case 'assigned': return 0; // Assigned
+        case 'picked_up': return 2; // Picked Up (Skipping Arrived at Pickup visually if backend doesn't track it explicitly)
+        case 'in_transit': return 2;
+        case 'delivered': return 4;
+        default: return 0;
     }
   };
 
-  const getStatusText = () => {
-    switch (orderStatus) {
-      case 'assigned':
-        return 'Arrive at Pickup';
-      case 'arrived-pickup':
-        return 'Confirm Pickup';
-      case 'picked-up':
-        return 'Arrive at Delivery';
-      case 'arrived-delivery':
-        return 'Complete Delivery';
-      case 'delivered':
-        return 'Completed';
-      default:
-        return 'Update Status';
-    }
-  };
-
-  const getCurrentStep = () => {
-    const steps = ['assigned', 'arrived-pickup', 'picked-up', 'arrived-delivery', 'delivered'];
-    return steps.indexOf(orderStatus);
-  };
+  const currentStep = getStepStatus();
 
   return (
     <View style={styles.container}>
       {/* Orange Rounded Header */}
-      <View style={styles.orangeHeader}>
+      <View style={[styles.orangeHeader, { paddingTop: insets.top + spacing.sm }]}>
         <TouchableOpacity 
           style={styles.backButton}
           onPress={() => navigation.goBack()}
@@ -102,13 +145,13 @@ export default function RiderOrderDetailsScreen({ navigation, route }: any) {
         
         <View style={styles.headerTextContainer}>
           <Text style={styles.title}>Order Details</Text>
-          <Text style={styles.subtitle}>{order.trackingId}</Text>
+          <Text style={styles.subtitle}>{displayOrder.trackingId}</Text>
         </View>
 
         {/* Earnings Badge */}
         <View style={styles.earningsBadge}>
           <Ionicons name="cash" size={24} color={colors.success} />
-          <Text style={styles.earningsText}>${order.earnings.toFixed(2)}</Text>
+          <Text style={styles.earningsText}>${displayOrder.earnings.toFixed(2)}</Text>
         </View>
       </View>
 
@@ -121,17 +164,17 @@ export default function RiderOrderDetailsScreen({ navigation, route }: any) {
         <View style={styles.progressCard}>
           <View style={styles.progressSteps}>
             <View style={styles.stepItem}>
-              <View style={[styles.stepDot, getCurrentStep() >= 0 && styles.stepDotActive]} />
+              <View style={[styles.stepDot, currentStep >= 0 && styles.stepDotActive]} />
               <Text style={styles.stepLabel}>Assigned</Text>
             </View>
-            <View style={[styles.stepLine, getCurrentStep() >= 1 && styles.stepLineActive]} />
+            <View style={[styles.stepLine, currentStep >= 1 && styles.stepLineActive]} />
             <View style={styles.stepItem}>
-              <View style={[styles.stepDot, getCurrentStep() >= 2 && styles.stepDotActive]} />
+              <View style={[styles.stepDot, currentStep >= 2 && styles.stepDotActive]} />
               <Text style={styles.stepLabel}>Picked Up</Text>
             </View>
-            <View style={[styles.stepLine, getCurrentStep() >= 3 && styles.stepLineActive]} />
+            <View style={[styles.stepLine, currentStep >= 3 && styles.stepLineActive]} />
             <View style={styles.stepItem}>
-              <View style={[styles.stepDot, getCurrentStep() >= 4 && styles.stepDotActive]} />
+              <View style={[styles.stepDot, currentStep >= 4 && styles.stepDotActive]} />
               <Text style={styles.stepLabel}>Delivered</Text>
             </View>
           </View>
@@ -148,34 +191,34 @@ export default function RiderOrderDetailsScreen({ navigation, route }: any) {
                 </View>
                 <View>
                   <Text style={styles.infoLabel}>Pickup Location</Text>
-                  <Text style={styles.infoValue}>{order.merchantName}</Text>
+                  <Text style={styles.infoValue}>{displayOrder.merchantName}</Text>
                 </View>
               </View>
               <View style={styles.actionButtons}>
                 <TouchableOpacity 
                   style={styles.callButton}
-                  onPress={() => handleCall(order.merchantPhone, order.merchantName)}
+                  onPress={() => handleCall(displayOrder.merchantPhone, displayOrder.merchantName)}
                 >
                   <Ionicons name="call" size={20} color={colors.textWhite} />
                 </TouchableOpacity>
                 <TouchableOpacity 
                   style={[styles.callButton, { backgroundColor: colors.info }]}
                   onPress={() => navigation.navigate('Chat', {
-                    recipientName: order.merchantName,
+                    recipientName: displayOrder.merchantName,
                     recipientRole: 'Merchant',
-                    recipientId: 'merchant-id-123', // This should be dynamic
-                    recipientPhone: order.merchantPhone,
-                    shipmentId: order.trackingId // This should be dynamic
+                    recipientId: order.merchant_id,
+                    recipientPhone: displayOrder.merchantPhone,
+                    shipmentId: order.id
                   })}
                 >
                   <Ionicons name="chatbubble-ellipses" size={20} color={colors.textWhite} />
                 </TouchableOpacity>
               </View>
             </View>
-            <Text style={styles.address}>{order.pickupAddress}</Text>
+            <Text style={styles.address}>{displayOrder.pickupAddress}</Text>
             <TouchableOpacity 
               style={styles.navigateButton}
-              onPress={() => handleNavigate(order.pickupAddress)}
+              onPress={() => handleNavigate(displayOrder.pickupAddress)}
             >
               <Ionicons name="navigate" size={20} color={colors.primary} />
               <Text style={styles.navigateButtonText}>Navigate to Pickup</Text>
@@ -194,34 +237,22 @@ export default function RiderOrderDetailsScreen({ navigation, route }: any) {
                 </View>
                 <View>
                   <Text style={styles.infoLabel}>Delivery Location</Text>
-                  <Text style={styles.infoValue}>{order.recipientName}</Text>
+                  <Text style={styles.infoValue}>{displayOrder.recipientName}</Text>
                 </View>
               </View>
               <View style={styles.actionButtons}>
                 <TouchableOpacity 
                   style={styles.callButton}
-                  onPress={() => handleCall(order.recipientPhone, order.recipientName)}
+                  onPress={() => handleCall(displayOrder.recipientPhone, displayOrder.recipientName)}
                 >
                   <Ionicons name="call" size={20} color={colors.textWhite} />
                 </TouchableOpacity>
-                <TouchableOpacity 
-                  style={[styles.callButton, { backgroundColor: colors.info }]}
-                  onPress={() => navigation.navigate('Chat', {
-                    recipientName: order.recipientName,
-                    recipientRole: 'Customer',
-                    recipientId: 'customer-id-456',
-                    recipientPhone: order.recipientPhone,
-                    shipmentId: order.trackingId
-                  })}
-                >
-                  <Ionicons name="chatbubble-ellipses" size={20} color={colors.textWhite} />
-                </TouchableOpacity>
               </View>
             </View>
-            <Text style={styles.address}>{order.deliveryAddress}</Text>
+            <Text style={styles.address}>{displayOrder.deliveryAddress}</Text>
             <TouchableOpacity 
               style={styles.navigateButton}
-              onPress={() => handleNavigate(order.deliveryAddress)}
+              onPress={() => handleNavigate(displayOrder.deliveryAddress)}
             >
               <Ionicons name="navigate" size={20} color={colors.primary} />
               <Text style={styles.navigateButtonText}>Navigate to Delivery</Text>
@@ -235,33 +266,33 @@ export default function RiderOrderDetailsScreen({ navigation, route }: any) {
           <View style={styles.detailsCard}>
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>Item Type</Text>
-              <Text style={styles.detailValue}>{order.itemType}</Text>
+              <Text style={styles.detailValue}>{displayOrder.itemType}</Text>
             </View>
             <View style={styles.divider} />
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>Package Size</Text>
-              <Text style={styles.detailValue}>{order.packageSize}</Text>
+              <Text style={styles.detailValue}>{displayOrder.packageSize}</Text>
             </View>
             <View style={styles.divider} />
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>Weight</Text>
-              <Text style={styles.detailValue}>{order.itemWeight}</Text>
+              <Text style={styles.detailValue}>{displayOrder.itemWeight}</Text>
             </View>
             <View style={styles.divider} />
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>Declared Value</Text>
-              <Text style={styles.detailValue}>{order.declaredValue}</Text>
+              <Text style={styles.detailValue}>{displayOrder.declaredValue}</Text>
             </View>
           </View>
         </View>
 
         {/* Special Instructions */}
-        {order.specialInstructions && (
+        {displayOrder.specialInstructions && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Special Instructions</Text>
             <View style={styles.instructionsCard}>
               <Ionicons name="information-circle" size={24} color={colors.warning} />
-              <Text style={styles.instructionsText}>{order.specialInstructions}</Text>
+              <Text style={styles.instructionsText}>{displayOrder.specialInstructions}</Text>
             </View>
           </View>
         )}
@@ -270,52 +301,59 @@ export default function RiderOrderDetailsScreen({ navigation, route }: any) {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Timeline</Text>
           <View style={styles.timelineCard}>
-            <View style={styles.timelineItem}>
-              <Ionicons name="time-outline" size={20} color={colors.textLight} />
-              <View style={styles.timelineContent}>
-                <Text style={styles.timelineLabel}>Order Placed</Text>
-                <Text style={styles.timelineValue}>{order.orderTime}</Text>
-              </View>
-            </View>
-            <View style={styles.timelineItem}>
-              <Ionicons name="navigate-outline" size={20} color={colors.textLight} />
-              <View style={styles.timelineContent}>
-                <Text style={styles.timelineLabel}>Distance</Text>
-                <Text style={styles.timelineValue}>{order.distance} • {order.estimatedTime}</Text>
-              </View>
-            </View>
-            <View style={styles.timelineItem}>
-              <Ionicons name="flag-outline" size={20} color={colors.textLight} />
-              <View style={styles.timelineContent}>
-                <Text style={styles.timelineLabel}>Estimated Delivery</Text>
-                <Text style={styles.timelineValue}>{order.estimatedDelivery}</Text>
-              </View>
-            </View>
+            {timelineEvents.map((event, index) => (
+                <View key={index} style={styles.timelineItem}>
+                  <Ionicons name={event.icon as any} size={20} color={index === timelineEvents.length - 1 ? colors.primary : colors.textLight} />
+                  <View style={styles.timelineContent}>
+                    <Text style={styles.timelineLabel}>{event.title}</Text>
+                    <Text style={styles.timelineValue}>
+                        {event.time}
+                        {event.description ? ` • ${event.description}` : ''}
+                    </Text>
+                  </View>
+                </View>
+            ))}
           </View>
         </View>
       </ScrollView>
 
       {/* Bottom Action Buttons */}
-      <View style={styles.bottomActions}>
-        {orderStatus !== 'delivered' && (
+      <View style={[styles.bottomActions, { paddingBottom: insets.bottom > 0 ? insets.bottom : spacing.lg }]}>
+         {/* Only show report button if not delivered */}
+        {order.status !== 'delivered' && (
           <TouchableOpacity 
             style={styles.reportButton}
             onPress={() => {
-              Alert.alert('Report Issue', 'What seems to be the problem?');
+              Alert.alert('Report Issue', 'Please contact support or the merchant for assistance.');
             }}
           >
             <Ionicons name="warning-outline" size={20} color={colors.error} />
-            <Text style={styles.reportButtonText}>Report Issue</Text>
+            <Text style={styles.reportButtonText}>Report</Text>
           </TouchableOpacity>
         )}
         
-        <TouchableOpacity 
-          style={styles.statusButton}
-          onPress={handleStatusUpdate}
-        >
-          <Text style={styles.statusButtonText}>{getStatusText()}</Text>
-          <Ionicons name="chevron-forward" size={20} color={colors.textWhite} />
-        </TouchableOpacity>
+        {buttonAction ? (
+            <TouchableOpacity 
+              style={[
+                styles.statusButton, 
+                buttonAction.variant === 'success' && { backgroundColor: colors.success },
+                buttonAction.variant === 'disabled' && { backgroundColor: colors.textLight }
+              ]}
+              onPress={buttonAction.onPress}
+              disabled={buttonAction.variant === 'disabled' || isProcessing}
+            >
+              {isProcessing ? (
+                 <ActivityIndicator color={colors.textWhite} />
+              ) : (
+                <>
+                  <Text style={styles.statusButtonText}>{buttonAction.label}</Text>
+                  {buttonAction.variant !== 'disabled' && (
+                     <Ionicons name="chevron-forward" size={20} color={colors.textWhite} />
+                  )}
+                </>
+              )}
+            </TouchableOpacity>
+        ) : null}
       </View>
     </View>
   );
@@ -326,9 +364,42 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.backgroundLight,
   },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: colors.backgroundLight,
+  },
+  loadingText: {
+    marginTop: spacing.md,
+    fontSize: typography.fontSize.base,
+    color: colors.textLight,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.xl,
+    backgroundColor: colors.backgroundLight,
+  },
+  errorText: {
+     marginTop: spacing.md,
+     fontSize: typography.fontSize.lg,
+     color: colors.text,
+     marginBottom: spacing.lg,
+  },
+  retryButton: {
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.md,
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.md,
+  },
+  retryButtonText: {
+    color: colors.textWhite,
+    fontWeight: 'bold',
+  },
   orangeHeader: {
     backgroundColor: colors.primary,
-    paddingTop: Platform.OS === 'ios' ? 50 : 30,
     paddingBottom: 40,
     paddingHorizontal: spacing.lg,
     borderBottomLeftRadius: 30,
@@ -369,7 +440,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: spacing.lg,
-    paddingBottom: 100,
+    paddingBottom: 140,
   },
   progressCard: {
     backgroundColor: colors.background,
@@ -591,7 +662,8 @@ const styles = StyleSheet.create({
     right: 0,
     flexDirection: 'row',
     gap: spacing.md,
-    padding: spacing.lg,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
     backgroundColor: colors.background,
     borderTopWidth: 1,
     borderTopColor: colors.border,

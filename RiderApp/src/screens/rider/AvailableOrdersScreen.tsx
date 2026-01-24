@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,12 +7,17 @@ import {
   TouchableOpacity,
   Platform,
   RefreshControl,
+  ActivityIndicator,
+  Alert
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { colors, typography, spacing, borderRadius } from '../../theme';
+import { riderApi } from '../../services/api';
+import { formatDistanceToNow } from 'date-fns';
 
-interface Order {
+interface AvailableOrder {
   id: string;
   trackingId: string;
   pickupAddress: string;
@@ -23,107 +28,138 @@ interface Order {
   packageSize: 'small' | 'medium' | 'large';
   estimatedTime: string;
   postedTime: string;
+  rawDate: string; 
+}
+
+interface DeliveredOrder {
+  id: string;
+  trackingId: string;
+  status: string;
+  recipientName: string;
+  deliveryAddress: string; 
+  deliveryFee: number;
+  codAmount: number;
+  scheduledDeliveryTime: string;
+  actualDeliveryTime: string;
+  merchantName: string;
 }
 
 export default function AvailableOrdersScreen() {
+  const insets = useSafeAreaInsets();
   const navigation = useNavigation<any>();
   const [refreshing, setRefreshing] = useState(false);
-  const [selectedFilter, setSelectedFilter] = useState<'all' | 'nearby' | 'high-pay'>('all');
+  const [loading, setLoading] = useState(true);
+  
+  // Data States
+  const [deliveredOrders, setDeliveredOrders] = useState<DeliveredOrder[]>([]);
+  
+  // Filters
+  const [selectedFilter, setSelectedFilter] = useState<'all' | 'today' | 'yesterday' | 'week' | 'month'>('all');
 
-  const orders: Order[] = [
-    {
-      id: '1',
-      trackingId: 'CE2024001234570',
-      pickupAddress: '123 Main St, Manhattan, NY 10001',
-      deliveryAddress: '456 Park Ave, Brooklyn, NY 11201',
-      distance: '2.3 km',
-      earnings: 45.99,
-      itemType: 'Electronics',
-      packageSize: 'medium',
-      estimatedTime: '18 min',
-      postedTime: '2 min ago',
-    },
-    {
-      id: '2',
-      trackingId: 'CE2024001234571',
-      pickupAddress: '789 5th Avenue, Manhattan, NY 10022',
-      deliveryAddress: '321 Madison Ave, New York, NY 10017',
-      distance: '1.5 km',
-      earnings: 35.00,
-      itemType: 'Documents',
-      packageSize: 'small',
-      estimatedTime: '12 min',
-      postedTime: '5 min ago',
-    },
-    {
-      id: '3',
-      trackingId: 'CE2024001234572',
-      pickupAddress: '555 West St, Brooklyn, NY 11201',
-      deliveryAddress: '777 East Ave, Queens, NY 11101',
-      distance: '4.8 km',
-      earnings: 58.50,
-      itemType: 'Food & Beverages',
-      packageSize: 'large',
-      estimatedTime: '32 min',
-      postedTime: '8 min ago',
-    },
-    {
-      id: '4',
-      trackingId: 'CE2024001234573',
-      pickupAddress: '222 Broadway, Manhattan, NY 10001',
-      deliveryAddress: '888 Park Ln, Brooklyn, NY 11201',
-      distance: '3.2 km',
-      earnings: 42.00,
-      itemType: 'Clothing',
-      packageSize: 'medium',
-      estimatedTime: '22 min',
-      postedTime: '12 min ago',
-    },
-  ];
+  const fetchOrders = useCallback(async () => {
+    try {
+      setLoading(true);
+      
+      let startDate: string | undefined;
+      let endDate: string | undefined;
+      
+      const now = new Date();
+      // "Today" means from 00:00:00 local to 23:59:59 local
+      // Note: Date() constructors differ in local vs UTC interpretation if not careful,
+      // but new Date(y, m, d) creates specific local time 00:00:00.
+      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      
+      if (selectedFilter === 'today') {
+          startDate = startOfDay.toISOString();
+          endDate = new Date(startOfDay.getTime() + 86400000 - 1).toISOString();
+      } else if (selectedFilter === 'yesterday') {
+          const yesterday = new Date(startOfDay.getTime() - 86400000);
+          startDate = yesterday.toISOString();
+          // End of yesterday is just before start of today
+          endDate = new Date(startOfDay.getTime() - 1).toISOString();
+      } else if (selectedFilter === 'week') {
+          const weekAgo = new Date(startOfDay.getTime() - 7 * 86400000);
+          startDate = weekAgo.toISOString();
+      } else if (selectedFilter === 'month') {
+          const monthAgo = new Date(startOfDay.getTime() - 30 * 86400000);
+          startDate = monthAgo.toISOString();
+      }
+      
+      console.log(`Fetching orders with filter: ${selectedFilter}, Date Range: ${startDate} - ${endDate}`);
+
+      // Fetch Delivered Orders
+      const response = await riderApi.getCompletedOrders({ 
+          limit: 50,
+          startDate,
+          endDate
+      });
+
+      if (response.success && response.data?.shipments) {
+          const mappedDelivered = response.data.shipments.map((s: any) => ({
+              id: s.id,
+              trackingId: s.trackingNumber,
+              status: s.status,
+              recipientName: s.recipientName,
+              deliveryAddress: s.deliveryAddress,
+              deliveryFee: parseFloat(s.deliveryFee || 0),
+              codAmount: parseFloat(s.codAmount || 0),
+              scheduledDeliveryTime: s.scheduledDeliveryTime,
+              actualDeliveryTime: s.actualDeliveryTime,
+              merchantName: s.merchant?.full_name || 'Unknown Merchant'
+          }));
+          setDeliveredOrders(mappedDelivered);
+      } else {
+        // Handle empty success if needed, though default is okay
+      }
+    } catch (error) {
+      console.error('Failed to fetch orders', error);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [selectedFilter]);
+
+  // Initial Load on Focus
+  useFocusEffect(
+    useCallback(() => {
+      fetchOrders();
+    }, [fetchOrders])
+  );
+
+  // Trigger fetch when filter changes
+  // Note: Since fetchOrders depends on selectedFilter, useFocusEffect technically handles it 
+  // if the screen is focused, but useEffect is safer for non-focus updates logic.
+  // However, useFocusEffect(useCallback(..., [fetchOrders])) already covers it because
+  // fetchOrders changes when selectedFilter changes.
+  // We'll leave the pattern primarily as useFocusEffect but ensure the logic inside is solid.
+  // To be absolutely safe and conventional:
+  useEffect(() => {
+      fetchOrders();
+  }, [selectedFilter]);
 
   const handleRefresh = () => {
     setRefreshing(true);
-    // TODO: Fetch new orders
-    setTimeout(() => setRefreshing(false), 1500);
+    fetchOrders();
   };
-
-  const handleAcceptOrder = (orderId: string) => {
-    // TODO: Accept order logic
-    const parent = navigation.getParent();
-    if (parent) {
-      parent.navigate('RiderOrderDetails', { orderId });
-    }
-  };
-
-  const getPackageSizeIcon = (size: string) => {
-    switch (size) {
-      case 'small':
-        return 'cube-outline';
-      case 'medium':
-        return 'cube';
-      case 'large':
-        return 'cube';
-      default:
-        return 'cube-outline';
-    }
-  };
-
-  const filteredOrders = orders; // TODO: Apply actual filtering
 
   return (
     <View style={styles.container}>
-      {/* Orange Rounded Header */}
-      <View style={styles.orangeHeader}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Ionicons name="arrow-back" size={24} color={colors.textWhite} />
-        </TouchableOpacity>
+      {/* Header */}
+      <View style={[styles.orangeHeader, { paddingTop: insets.top + spacing.md }]}>
+        <View style={styles.headerTopRow}>
+            <TouchableOpacity 
+              style={styles.backButton}
+              onPress={() => navigation.goBack()}
+            >
+              <Ionicons name="arrow-back" size={24} color={colors.textWhite} />
+            </TouchableOpacity>
+        </View>
         
         <View style={styles.headerTextContainer}>
-          <Text style={styles.title}>Available Orders</Text>
-          <Text style={styles.subtitle}>{orders.length} orders nearby</Text>
+          <Text style={styles.title}>All Deliveries</Text>
+          <Text style={styles.subtitle}>
+              {deliveredOrders.length} completed orders
+          </Text>
         </View>
       </View>
 
@@ -132,7 +168,7 @@ export default function AvailableOrdersScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.primary} />
         }
       >
         {/* Filter Chips */}
@@ -142,124 +178,69 @@ export default function AvailableOrdersScreen() {
           style={styles.filtersScrollView}
           contentContainerStyle={styles.filtersContainer}
         >
-          <TouchableOpacity
-            style={[styles.filterChip, selectedFilter === 'all' && styles.filterChipActive]}
-            onPress={() => setSelectedFilter('all')}
-          >
-            <Ionicons 
-              name="list" 
-              size={16} 
-              color={selectedFilter === 'all' ? colors.textWhite : colors.text} 
-            />
-            <Text style={[styles.filterText, selectedFilter === 'all' && styles.filterTextActive]}>
-              All Orders
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.filterChip, selectedFilter === 'nearby' && styles.filterChipActive]}
-            onPress={() => setSelectedFilter('nearby')}
-          >
-            <Ionicons 
-              name="location" 
-              size={16} 
-              color={selectedFilter === 'nearby' ? colors.textWhite : colors.text} 
-            />
-            <Text style={[styles.filterText, selectedFilter === 'nearby' && styles.filterTextActive]}>
-              Nearby
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.filterChip, selectedFilter === 'high-pay' && styles.filterChipActive]}
-            onPress={() => setSelectedFilter('high-pay')}
-          >
-            <Ionicons 
-              name="cash" 
-              size={16} 
-              color={selectedFilter === 'high-pay' ? colors.textWhite : colors.text} 
-            />
-            <Text style={[styles.filterText, selectedFilter === 'high-pay' && styles.filterTextActive]}>
-              High Pay
-            </Text>
-          </TouchableOpacity>
+          {[
+              { id: 'all', label: 'All Time' },
+              { id: 'today', label: 'Today' },
+              { id: 'yesterday', label: 'Yesterday' },
+              { id: 'week', label: 'Last 7 Days' },
+              { id: 'month', label: 'Last 30 Days' }
+          ].map((filter) => (
+              <TouchableOpacity
+                key={filter.id}
+                style={[styles.filterChip, selectedFilter === filter.id && styles.filterChipActive]}
+                onPress={() => setSelectedFilter(filter.id as any)}
+              >
+                <Text style={[styles.filterText, selectedFilter === filter.id && styles.filterTextActive]}>
+                  {filter.label}
+                </Text>
+              </TouchableOpacity>
+          ))}
         </ScrollView>
 
-        {/* Orders List */}
-        {filteredOrders.map((order) => (
-          <View key={order.id} style={styles.orderCard}>
-            <View style={styles.orderHeader}>
-              <View style={styles.orderHeaderLeft}>
-                <Ionicons name="time-outline" size={16} color={colors.textLight} />
-                <Text style={styles.postedTime}>{order.postedTime}</Text>
-              </View>
-              <View style={styles.earningsBadge}>
-                <Text style={styles.earningsText}>${order.earnings.toFixed(2)}</Text>
-              </View>
-            </View>
-
-            <Text style={styles.trackingId}>{order.trackingId}</Text>
-
-            {/* Route */}
-            <View style={styles.routeSection}>
-              <View style={styles.routeItem}>
-                <View style={styles.pickupDot} />
-                <View style={styles.routeDetails}>
-                  <Text style={styles.routeLabel}>Pickup</Text>
-                  <Text style={styles.address} numberOfLines={1}>{order.pickupAddress}</Text>
+        <View style={{ paddingTop: spacing.xs }}>
+            {loading && !refreshing ? (
+                <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 20 }} />
+            ) : deliveredOrders.length === 0 ? (
+                <View style={styles.emptyState}>
+                    <Ionicons name="checkmark-done-circle-outline" size={64} color={colors.textLight} />
+                    <Text style={styles.emptyStateText}>No delivered orders found</Text>
+                    <Text style={styles.emptyStateSubtext}>Try adjusting the filter</Text>
                 </View>
-              </View>
+            ) : (
+                deliveredOrders.map((order) => (
+                    <View key={order.id} style={styles.orderCard}>
+                        <View style={styles.orderHeader}>
+                            <View style={[styles.statusBadge, { backgroundColor: colors.success }]}>
+                                <Text style={styles.statusText}>Delivered</Text>
+                            </View>
+                            <Text style={{ color: colors.textLight, fontSize: 12 }}>
+                                {order.actualDeliveryTime ? new Date(order.actualDeliveryTime).toLocaleDateString() : ''}
+                            </Text>
+                        </View>
 
-              <View style={styles.routeConnector}>
-                <View style={styles.dashedLine} />
-              </View>
+                        <Text style={styles.trackingId}>{order.trackingId}</Text>
+                        
+                        <View style={{ marginBottom: spacing.md }}>
+                            <View style={styles.rowItem}>
+                                <Ionicons name="business" size={16} color={colors.textLight} />
+                                <Text style={styles.detailText}>{order.merchantName}</Text>
+                            </View>
+                            <View style={styles.rowItem}>
+                                <Ionicons name="location" size={16} color={colors.textLight} />
+                                <Text style={styles.detailText} numberOfLines={2}>{order.deliveryAddress}</Text>
+                            </View>
+                        </View>
 
-              <View style={styles.routeItem}>
-                <Ionicons name="location" size={20} color={colors.error} />
-                <View style={styles.routeDetails}>
-                  <Text style={styles.routeLabel}>Delivery</Text>
-                  <Text style={styles.address} numberOfLines={1}>{order.deliveryAddress}</Text>
-                </View>
-              </View>
-            </View>
-
-            {/* Order Details */}
-            <View style={styles.orderDetails}>
-              <View style={styles.detailItem}>
-                <Ionicons name={getPackageSizeIcon(order.packageSize) as any} size={18} color={colors.textLight} />
-                <Text style={styles.detailText}>{order.itemType}</Text>
-              </View>
-              <View style={styles.detailItem}>
-                <Ionicons name="navigate" size={18} color={colors.textLight} />
-                <Text style={styles.detailText}>{order.distance}</Text>
-              </View>
-              <View style={styles.detailItem}>
-                <Ionicons name="time" size={18} color={colors.textLight} />
-                <Text style={styles.detailText}>{order.estimatedTime}</Text>
-              </View>
-            </View>
-
-            {/* Accept Button */}
-            <TouchableOpacity 
-              style={styles.acceptButton}
-              onPress={() => handleAcceptOrder(order.id)}
-            >
-              <Ionicons name="checkmark-circle" size={20} color={colors.textWhite} />
-              <Text style={styles.acceptButtonText}>Accept Order</Text>
-            </TouchableOpacity>
-          </View>
-        ))}
-
-        {/* Empty State */}
-        {filteredOrders.length === 0 && (
-          <View style={styles.emptyState}>
-            <Ionicons name="search-outline" size={64} color={colors.textLight} />
-            <Text style={styles.emptyStateText}>No orders available</Text>
-            <Text style={styles.emptyStateSubtext}>
-              Pull down to refresh and check for new orders
-            </Text>
-          </View>
-        )}
+                        <View style={[styles.orderDetails, { backgroundColor: '#F0FFF4' }]}>
+                            <Text style={{ fontWeight: 'bold', color: colors.success }}>Earnings: ${order.deliveryFee.toFixed(2)}</Text>
+                            {order.codAmount > 0 && (
+                                <Text style={{ fontSize: 12, color: colors.textLight }}>COD: ${order.codAmount}</Text>
+                            )}
+                        </View>
+                    </View>
+                ))
+            )}
+        </View>
       </ScrollView>
     </View>
   );
@@ -270,20 +251,30 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.backgroundLight,
   },
+  center: {
+    justifyContent: 'center',
+    alignItems: 'center'
+  },
   orangeHeader: {
     backgroundColor: colors.primary,
-    paddingTop: Platform.OS === 'ios' ? 50 : 30,
-    paddingBottom: 40,
+    paddingBottom: 20,
     paddingHorizontal: spacing.lg,
     borderBottomLeftRadius: 30,
     borderBottomRightRadius: 30,
-    minHeight: 160,
+    minHeight: 120, // Reduced height since tabs are gone
+  },
+  headerTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.xs,
   },
   backButton: {
-    marginBottom: spacing.md,
+    padding: spacing.xs,
   },
   headerTextContainer: {
-    marginTop: spacing.sm,
+    marginTop: spacing.xs,
+    marginBottom: spacing.md,
   },
   title: {
     fontSize: typography.fontSize['3xl'],
@@ -303,12 +294,14 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xl,
   },
   filtersScrollView: {
-    maxHeight: 60,
+    flexGrow: 0,
+    marginBottom: spacing.sm,
   },
   filtersContainer: {
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
     gap: spacing.sm,
+    alignItems: 'center',
   },
   filterChip: {
     flexDirection: 'row',
@@ -319,9 +312,12 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.full,
     backgroundColor: colors.background,
     marginRight: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   filterChipActive: {
     backgroundColor: colors.primary,
+    borderColor: colors.primary,
   },
   filterText: {
     fontSize: typography.fontSize.sm,
@@ -350,68 +346,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: spacing.md,
   },
-  orderHeaderLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  postedTime: {
-    fontSize: typography.fontSize.sm,
-    color: colors.textLight,
-  },
-  earningsBadge: {
-    backgroundColor: colors.success,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: borderRadius.md,
-  },
-  earningsText: {
-    fontSize: typography.fontSize.lg,
-    fontWeight: typography.fontWeight.bold,
-    color: colors.textWhite,
-  },
   trackingId: {
     fontSize: typography.fontSize.base,
     fontWeight: typography.fontWeight.bold,
     color: colors.text,
     marginBottom: spacing.md,
-  },
-  routeSection: {
-    marginBottom: spacing.md,
-  },
-  routeItem: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: spacing.md,
-  },
-  pickupDot: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: colors.success,
-    marginTop: 2,
-  },
-  routeDetails: {
-    flex: 1,
-  },
-  routeLabel: {
-    fontSize: typography.fontSize.xs,
-    color: colors.textLight,
-    marginBottom: spacing.xs,
-  },
-  address: {
-    fontSize: typography.fontSize.base,
-    color: colors.text,
-    fontWeight: typography.fontWeight.medium,
-  },
-  routeConnector: {
-    marginLeft: 10,
-    marginVertical: spacing.xs,
-  },
-  dashedLine: {
-    width: 2,
-    height: 20,
-    backgroundColor: colors.border,
   },
   orderDetails: {
     flexDirection: 'row',
@@ -421,29 +360,27 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     marginBottom: spacing.md,
   },
-  detailItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
   detailText: {
     fontSize: typography.fontSize.sm,
     color: colors.text,
     fontWeight: typography.fontWeight.medium,
   },
-  acceptButton: {
-    flexDirection: 'row',
-    justifyContent: 'center',
+  statusBadge: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: borderRadius.sm,
+  },
+  statusText: {
+    fontSize: typography.fontSize.xs,
+    color: colors.textWhite,
+    fontWeight: typography.fontWeight.bold,
+    textTransform: 'capitalize',
+  },
+  rowItem: {
+    flexDirection: 'row', 
     alignItems: 'center',
     gap: spacing.sm,
-    backgroundColor: colors.primary,
-    borderRadius: borderRadius.lg,
-    padding: spacing.md,
-  },
-  acceptButtonText: {
-    fontSize: typography.fontSize.lg,
-    fontWeight: typography.fontWeight.bold,
-    color: colors.textWhite,
+    marginBottom: spacing.xs
   },
   emptyState: {
     alignItems: 'center',

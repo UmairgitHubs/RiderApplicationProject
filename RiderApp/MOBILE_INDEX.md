@@ -24,6 +24,7 @@ Organized by functional domain or role.
 - `MerchantHome.tsx`: Dashboard for merchants.
 - `CreateShipmentScreen.tsx`, `IndividualShipmentScreen.tsx`, `FranchiseShipmentScreen.tsx`.
 - `ShipmentsListScreen.tsx`, `ShipmentTrackingScreen.tsx`, `ShipmentDetailsScreen.tsx`.
+- `FranchiseTrackingScreen.tsx`, `FranchiseOrderDetailsScreen.tsx`.
 - `WalletScreen.tsx`, `PaymentMethodsScreen.tsx`.
 - `ManageAddressesScreen.tsx`, `AddAddressScreen.tsx`, `EditAddressScreen.tsx`.
 - `ProfileScreen.tsx`, `EditProfileScreen.tsx`.
@@ -42,7 +43,7 @@ Organized by functional domain or role.
 - `RiderHome.tsx` (Entry).
 
 #### **Common Screens (`common/`)**
-- `AboutScreen.tsx`.
+- `AboutScreen.tsx`, `FAQScreen.tsx`.
 - `ChatScreen.tsx`, `ChatSupportScreen.tsx`.
 - `NotificationSettingsScreen.tsx`, `NotificationsWrapper.tsx`.
 - `LanguageSettingsScreen.tsx`, `DarkModeScreen.tsx`.

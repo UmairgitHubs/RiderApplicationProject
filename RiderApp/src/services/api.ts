@@ -9,7 +9,7 @@ import { Platform } from "react-native";
 
 // Your computer's IP address (update if changed)
 // Found: 192.168.100.223
-const COMPUTER_IP = "192.168.100.223"; // Update this if your IP changes
+const COMPUTER_IP = "192.168.100.232"; // Update this if your IP changes
 
 export interface ApiResponse<T = any> {
   success: boolean;
@@ -538,17 +538,22 @@ export const riderApi = {
     const queryString = params
       ? "?" + new URLSearchParams(params as any).toString()
       : "";
-    return api.get(`/rider/available-orders${queryString}`);
+    return api.get<ApiResponse>(`/rider/available-orders${queryString}`);
   },
 
   // Accept an order
   acceptOrder: async (shipmentId: string) => {
-    return api.post("/rider/accept-order", { shipmentId });
+    return api.post<ApiResponse>("/rider/accept-order", { shipmentId });
   },
 
   // Get active orders
   getActiveOrders: async () => {
-    return api.get("/rider/active-orders");
+    return api.get<ApiResponse>("/rider/active-orders");
+  },
+
+  // Pickup an order
+  pickupOrder: async (shipmentId: string) => {
+    return api.post<ApiResponse>("/rider/pickup-order", { shipmentId });
   },
 
   // Complete delivery
@@ -557,7 +562,7 @@ export const riderApi = {
     codAmount?: number;
     notes?: string;
   }) => {
-    return api.post("/rider/complete-delivery", data);
+    return api.post<ApiResponse>("/rider/complete-delivery", data);
   },
 
   // Update location
@@ -569,12 +574,12 @@ export const riderApi = {
     heading?: number;
     shipmentId?: string;
   }) => {
-    return api.post("/rider/update-location", data);
+    return api.post<ApiResponse>("/rider/update-location", data);
   },
 
   // Toggle online status
   toggleOnlineStatus: async (isOnline: boolean) => {
-    return api.post("/rider/toggle-online", { isOnline });
+    return api.post<ApiResponse>("/rider/toggle-online", { isOnline });
   },
 
   // Get earnings
@@ -582,21 +587,45 @@ export const riderApi = {
     startDate?: string;
     endDate?: string;
   }) => {
-    const queryString = params
-      ? "?" + new URLSearchParams(params as any).toString()
+    // Filter out undefined/null values
+    const cleanParams: any = {};
+    if (params?.startDate) cleanParams.startDate = params.startDate;
+    if (params?.endDate) cleanParams.endDate = params.endDate;
+    
+    const queryString = Object.keys(cleanParams).length > 0
+      ? "?" + new URLSearchParams(cleanParams).toString()
       : "";
-    return api.get(`/rider/earnings${queryString}`);
+    return api.get<ApiResponse>(`/rider/earnings${queryString}`);
   },
 
   // Get completed orders (recent deliveries)
   getCompletedOrders: async (params?: {
     page?: number;
     limit?: number;
+    startDate?: string;
+    endDate?: string;
+  }) => {
+    const cleanParams: any = {};
+    if (params?.page) cleanParams.page = params.page.toString();
+    if (params?.limit) cleanParams.limit = params.limit.toString();
+    if (params?.startDate) cleanParams.startDate = params.startDate;
+    if (params?.endDate) cleanParams.endDate = params.endDate;
+
+    const queryString = Object.keys(cleanParams).length > 0
+      ? "?" + new URLSearchParams(cleanParams).toString()
+      : "";
+    return api.get<ApiResponse>(`/rider/completed-orders${queryString}`);
+  },
+
+  // Get assigned routes
+  getRoutes: async (params?: {
+    status?: string;
+    date?: string;
   }) => {
     const queryString = params
       ? "?" + new URLSearchParams(params as any).toString()
       : "";
-    return api.get(`/rider/completed-orders${queryString}`);
+    return api.get<ApiResponse>(`/rider/routes${queryString}`);
   },
 };
 

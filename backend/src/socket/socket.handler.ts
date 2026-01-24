@@ -219,13 +219,34 @@ export const setupSocket = (io: Server) => {
     socket.on('send_message', async (data: { orderId: string; content: string; recipientId: string }) => {
       try {
         const { orderId, content, recipientId } = data;
+        
+        // Fetch shipment to determine participants and security
+        const shipment = await prisma.shipment.findUnique({
+             where: { id: orderId },
+             select: { merchant_id: true, rider_id: true }
+        });
+
+        if (!shipment) {
+             socket.emit('error', { message: 'Order not found' });
+             return;
+        }
+
+        let finalRecipientId = recipientId;
+
+        // Force-resolve recipient for reliability
+        if (userId === shipment.merchant_id) {
+            finalRecipientId = shipment.rider_id!;
+        } else if (userId === shipment.rider_id) {
+            finalRecipientId = shipment.merchant_id;
+        }
+        // If admin, respect the passed recipientId (or add logic if needed)
 
         // Save message via Prisma
         const message = await prisma.chatMessage.create({
           data: {
             shipment_id: orderId,
             sender_id: userId,
-            recipient_id: recipientId,
+            recipient_id: finalRecipientId || null,
             content: content,
           },
           include: {
@@ -235,9 +256,10 @@ export const setupSocket = (io: Server) => {
           }
         });
 
-        // Emit message to the room
+        // Emit message to the room (for those active in chat)
         io.to(`order:${orderId}`).emit('chat:new-message', {
           orderId,
+          shipmentId: orderId, 
           message: {
             id: message.id,
             content: message.content,
@@ -246,6 +268,21 @@ export const setupSocket = (io: Server) => {
             createdAt: message.created_at
           }
         });
+
+        // Emit to recipient's personal room (For Notifications)
+        if (finalRecipientId) {
+            io.to(`user:${finalRecipientId}`).emit('chat:new-message', {
+                orderId,
+                shipmentId: orderId, 
+                message: {
+                    id: message.id,
+                    content: message.content,
+                    senderId: message.sender_id,
+                    senderName: message.sender.full_name,
+                    createdAt: message.created_at
+                }
+            });
+        }
 
         // Offline logic: If recipient is not in the room
         const room = io.sockets.adapter.rooms.get(`order:${orderId}`);

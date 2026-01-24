@@ -62,6 +62,8 @@ API route definitions mapping URLs to controllers.
   - `support.routes.ts`
   - `voice.routes.ts`
   - `wallet.routes.ts`
+  - `cms.routes.ts`
+  - `settings.routes.ts`
 
 ### 4. **Services (`services/`)**
 Business logic and external service integrations.
