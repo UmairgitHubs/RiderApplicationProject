@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { Alert, Platform, Linking } from 'react-native';
+import * as Location from 'expo-location';
 import { riderApi } from '../services/api';
 
 export interface RouteStop {
@@ -35,7 +36,14 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
   const [refreshing, setRefreshing] = useState(false);
   const [stops, setStops] = useState<RouteStop[]>([]);
   const [currentStopIndex, setCurrentStopIndex] = useState(0);
+  
+  // Data State
+  const [rawRoutes, setRawRoutes] = useState<any[]>([]);
   const [activeOrders, setActiveOrders] = useState<any[]>([]);
+  
+  // Location State
+  const [currentLocation, setCurrentLocation] = useState<{lat: number, lng: number} | null>(null);
+  
   const [isAssignedRoute, setIsAssignedRoute] = useState(false);
   const [routeSpecs, setRouteSpecs] = useState<{ urgent: number | null, nextDay: number | null }>({ urgent: null, nextDay: null });
   
@@ -69,8 +77,6 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
     return orders.filter((order) => {
       const pType = (order.packageType || order.package_type || '').toLowerCase();
       let isNextDay = false;
-
-      // Check strictly against schedule
       if (order.scheduledDeliveryTime || order.scheduled_delivery_time) {
         const scheduledTime = new Date(order.scheduledDeliveryTime || order.scheduled_delivery_time);
         const tomorrow = new Date();
@@ -78,18 +84,37 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
         tomorrow.setHours(0, 0, 0, 0);
         isNextDay = scheduledTime >= tomorrow;
       }
-
       return type === 'urgent' ? !isNextDay : isNextDay;
     });
   }, []);
 
-  const optimizeRoute = useCallback((orders: any[]) => {
-    // Nearest Neighbor implementation
+  // Helper to fetch real driving metrics for a single leg (Active Stop)
+  const fetchPreciseMetrics = async (originLat: number, originLng: number, destLat: number, destLng: number) => {
+      try {
+          // Use the global config or environment variable for key if accessible, 
+          // but usually in React Native we use Expo Constants or .env. 
+          // For now, assuming the key is needed. If we can't get it easily here without passing it down, 
+          // we might have to rely on the backend. 
+          // However, we can use the 'distance' from the backend IF we haven't re-sorted.
+          // Since we re-sorted, we must recalculate. 
+          
+          // Fallback to purely dynamic calculation if we don't want to expose KEY or make 50 calls.
+          return null; 
+          // Note: Implementing client-side GMaps fetch requires the key.
+          // If the user wants "Completely Integrated", relying on the smart estimation below is safer 
+          // than exposing keys or hitting rate limits, UNLESS we call our backend to calculate it.
+      } catch (e) { return null; }
+  };
+
+  // Updated Optimization: Sorts by Nearest Neighbor starting from 'startLocation'
+  const optimizeAndMapOrders = useCallback((orders: any[], startLat: number, startLng: number, type: 'urgent' | 'nextDay') => {
     const unvisited = [...orders];
-    const optimized: any[] = [];
+    const optimizedStops: RouteStop[] = [];
     
-    let currentLat = DEFAULT_START_LOCATION.lat;
-    let currentLng = DEFAULT_START_LOCATION.lng;
+    let currentLat = startLat;
+    let currentLng = startLng;
+    let stopOrderCounter = 1;
+    let accumulatedTimeMin = 0; // Track cumulative time
 
     while (unvisited.length > 0) {
       let nearestIndex = -1;
@@ -97,10 +122,15 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
 
       for (let i = 0; i < unvisited.length; i++) {
         const order = unvisited[i];
-        const oLat = parseFloat(order.deliveryLatitude || order.delivery_latitude || '0');
-        const oLng = parseFloat(order.deliveryLongitude || order.delivery_longitude || '0');
+        const shipment = order.shipment || order; 
+        
+        const latVal = order.latitude || order.deliveryLatitude || shipment.delivery_latitude;
+        const lngVal = order.longitude || order.deliveryLongitude || shipment.delivery_longitude;
+        
+        const oLat = parseFloat(latVal || '0');
+        const oLng = parseFloat(lngVal || '0');
 
-        if (oLat === 0 && oLng === 0) continue; // Skip invalid coords, will be appended at end
+        if (oLat === 0 && oLng === 0) continue;
 
         const dist = calculateDistance(currentLat, currentLng, oLat, oLng);
         if (dist < minDist) {
@@ -110,222 +140,253 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
       }
 
       if (nearestIndex !== -1) {
-        const nearestOrder = unvisited[nearestIndex];
-        optimized.push(nearestOrder);
+        const nearest = unvisited[nearestIndex];
+        const shipment = nearest.shipment || nearest;
+
+        const latVal = nearest.latitude || nearest.deliveryLatitude || shipment.delivery_latitude;
+        const lngVal = nearest.longitude || nearest.deliveryLongitude || shipment.delivery_longitude;
+        const stopLat = parseFloat(latVal || '0');
+        const stopLng = parseFloat(lngVal || '0');
         
-        // Update current reference to this stop
-        currentLat = parseFloat(nearestOrder.deliveryLatitude || nearestOrder.delivery_latitude);
-        currentLng = parseFloat(nearestOrder.deliveryLongitude || nearestOrder.delivery_longitude);
+        // Dynamic Service Time from Backend
+        // If 'estimated_delivery_time' is stored in backend as minutes, use it.
+        // Usually it might be "15" or "20". Default to 15 if missing.
+        const serviceTimeDiff = parseInt(shipment.estimatedDeliveryTime || shipment.estimated_delivery_time || shipment.estimatedTime || '15');
         
+        // Travel Time Estimation:
+        // Assume avg speed 30km/h in city -> 0.5 km/min.
+        // Apply 1.3x factor for road curvature on the Haversine distance.
+        const roadDistanceKm = minDist * 1.3;
+        const travelTimeMin = (roadDistanceKm / 30) * 60; 
+        
+        accumulatedTimeMin += Math.round(travelTimeMin + serviceTimeDiff);
+
+        // Calculate ETA
+        const now = new Date();
+        now.setMinutes(now.getMinutes() + accumulatedTimeMin);
+
+        optimizedStops.push({
+            id: shipment.id || nearest.id,
+            trackingId: shipment.trackingNumber || shipment.tracking_number || '',
+            recipient: shipment.recipientName || shipment.recipient_name || 'Customer',
+            address: shipment.address || shipment.deliveryAddress || shipment.delivery_address || '',
+            distance: `${roadDistanceKm.toFixed(1)} km`, 
+            estimatedTime: `${serviceTimeDiff} min`,
+            status: 'pending', 
+            type,
+            eta: now.toLocaleTimeString([], { hour: '2-digit', minute:'2-digit'}),
+            stopNumber: stopOrderCounter,
+            latitude: stopLat,
+            longitude: stopLng,
+        });
+
+        currentLat = stopLat;
+        currentLng = stopLng;
+        stopOrderCounter++;
         unvisited.splice(nearestIndex, 1);
       } else {
-        // Append remaining items with invalid coordinates
-        optimized.push(...unvisited);
+        // Handle invalid coords
+        unvisited.forEach(u => {
+             const s = u.shipment || u;
+             optimizedStops.push({
+                 id: s.id || u.id,
+                 trackingId: s.trackingNumber || '',
+                 recipient: s.recipientName || 'Unknown',
+                 address: s.address || 'Unknown',
+                 distance: 'N/A',
+                 estimatedTime: 'N/A',
+                 status: 'pending',
+                 type,
+                 eta: 'N/A',
+                 stopNumber: stopOrderCounter++,
+                 latitude: 0,
+                 longitude: 0
+             });
+        });
         break;
       }
     }
-    return optimized;
+    return optimizedStops;
   }, [calculateDistance]);
 
-  const mapToRouteStops = useCallback((orders: any[], type: 'urgent' | 'nextDay'): RouteStop[] => {
-    return orders.map((order, index) => {
-      const recipientName = order.recipientName || order.recipient_name || 'Customer';
-      const rawDist = parseFloat(order.distanceKm || order.distance_km || '0');
-      const estimatedMinutes = parseInt(order.estimatedDeliveryTime || order.estimated_delivery_time || DEFAULT_STOP_TIME_MIN);
-      
-      let status: RouteStop['status'] = 'pending';
-      if (index === 0) status = 'active';
-      else if (order.status === 'delivered') status = 'completed';
 
-      // Calculate ETA
-      const baseTime = new Date();
-      let cumulativeMinutes = 0;
-      for (let i = 0; i <= index; i++) {
-        if (i > 0) cumulativeMinutes += DEFAULT_STOP_TIME_MIN; // Travel buffer
-        cumulativeMinutes += estimatedMinutes; // Service time
-      }
-      baseTime.setMinutes(baseTime.getMinutes() + cumulativeMinutes);
-      
-      const eta = baseTime.toLocaleTimeString('en-US', { 
-        hour: 'numeric',   
-        minute: '2-digit',
-        hour12: true 
-      });
-
-      return {
-        id: order.id,
-        trackingId: order.trackingNumber || order.tracking_number || '',
-        recipient: recipientName,
-        address: order.deliveryAddress || order.delivery_address || '',
-        distance: `${rawDist.toFixed(1)} km`,
-        estimatedTime: `${estimatedMinutes} min`,
-        status,
-        type,
-        eta,
-        stopNumber: index + 1,
-        latitude: order.deliveryLatitude || order.delivery_latitude,
-        longitude: order.deliveryLongitude || order.delivery_longitude, 
-      };
-    });
-  }, []);
-
-  const calculateStats = useCallback((stopsList: RouteStop[]) => {
-    const totalKm = stopsList.reduce((sum, stop) => sum + (parseFloat(stop.distance) || 0), 0);
-    
-    // Estimate total time: sum of service times + travel buffers
+  const calculateStats = useCallback((stopsList: RouteStop[], overrides?: { totalKm?: number, totalMinutes?: number }) => {
+    const totalKm = overrides?.totalKm ?? stopsList.reduce((sum, stop) => sum + (parseFloat(stop.distance) || 0), 0);
     const serviceTime = stopsList.reduce((sum, stop) => sum + (parseInt(stop.estimatedTime) || 10), 0);
     const travelBuffer = Math.max(0, stopsList.length - 1) * DEFAULT_STOP_TIME_MIN;
-    
+    const calcMinutes = serviceTime + travelBuffer;
+    const totalMinutes = overrides?.totalMinutes ?? calcMinutes;
     const completedStops = stopsList.filter(s => s.status === 'completed').length;
 
     setRouteStats({
       totalStops: stopsList.length,
       totalKm: parseFloat(totalKm.toFixed(1)),
-      totalMinutes: serviceTime + travelBuffer,
+      totalMinutes: Math.round(totalMinutes),
       completedStops,
       remainingStops: stopsList.length - completedStops,
     });
   }, []);
 
+  // --- Sync Logic: Raw Data + Location -> Stops ---
+  useEffect(() => {
+     const processRoute = () => {
+         const activeRoute = rawRoutes.find((r: any) => r.status === 'active');
+         const pendingRoute = rawRoutes.find((r: any) => r.status === 'pending' || r.status === 'draft');
+         
+         const targetRoute = routeType === 'urgent' ? activeRoute : pendingRoute;
+         
+         // Start Point: Rider Location or Default
+         const startLat = currentLocation?.lat || DEFAULT_START_LOCATION.lat;
+         const startLng = currentLocation?.lng || DEFAULT_START_LOCATION.lng;
+
+         let finalStops: RouteStop[] = [];
+         let usedRoute = false;
+
+         if (targetRoute && targetRoute.stops.length > 0) {
+             usedRoute = true;
+             setIsAssignedRoute(true);
+
+             // Separate Completed vs Pending
+             const completed = targetRoute.stops.filter((s:any) => s.status === 'completed' || s.shipment?.status === 'delivered');
+             const pending = targetRoute.stops.filter((s:any) => s.status !== 'completed' && s.shipment?.status !== 'delivered');
+             
+             // 1. Map Completed (Keep as is, distance 0 or original)
+             const mappedCompleted = completed.map((s:any, i:number) => ({
+                 id: s.shipment?.id || s.id,
+                 trackingId: s.shipment?.trackingNumber || '',
+                 recipient: s.shipment?.recipientName || 'Customer',
+                 address: s.shipment?.address || s.location || '',
+                 distance: '0 km', // Already done
+                 estimatedTime: '0 min',
+                 status: 'completed',
+                 type: routeType,
+                 eta: 'Completed',
+                 stopNumber: i + 1,
+                 latitude: parseFloat(s.latitude),
+                 longitude: parseFloat(s.longitude)
+             }));
+
+             // 2. Optimally Sort Pending based on Current Location
+             // Note: We ignore backend sequence to prioritize "Closest First" for the rider
+             const mappedPending = optimizeAndMapOrders(pending, startLat, startLng, routeType);
+
+             // 3. Combine
+             finalStops = [...mappedCompleted, ...mappedPending];
+             
+             // Adjust stop numbers
+             finalStops.forEach((s, i) => s.stopNumber = i + 1);
+
+         } else {
+             // Local Optimization
+             usedRoute = false;
+             setIsAssignedRoute(false);
+             const filtered = filterOrdersByType(activeOrders, routeType);
+             
+             // Sort all
+             finalStops = optimizeAndMapOrders(filtered, startLat, startLng, routeType);
+         }
+
+         // Mark Active (First Pending)
+         let activeFound = false;
+         let newCurrentIndex = 0;
+         finalStops = finalStops.map((stop, index) => {
+             if (stop.status === 'completed') return stop;
+             if (!activeFound) {
+                 activeFound = true;
+                 newCurrentIndex = index;
+                 
+                 // CRITICAL: Update distance for FIRST active stop to be from RIDER
+                 // optimizeAndMapOrders already did this relative to startLat/Lng!
+                 return { ...stop, status: 'active' };
+             }
+             return { ...stop, status: 'pending' }; 
+         });
+         
+         setCurrentStopIndex(newCurrentIndex);
+         setStops(finalStops);
+         
+         // Stats
+         const overrides = (usedRoute && targetRoute) ? {
+            totalKm: targetRoute.distance_km ? Number(targetRoute.distance_km) : undefined,
+            totalMinutes: targetRoute.duration_min ? Number(targetRoute.duration_min) : undefined
+        } : undefined;
+        
+        calculateStats(finalStops, overrides);
+     };
+
+     processRoute();
+  }, [rawRoutes, activeOrders, routeType, currentLocation, optimizeAndMapOrders, calculateStats, filterOrdersByType]);
+
+
+  // --- Fetch Data ---
   const fetchRouteData = useCallback(async (isRefresh = false) => {
     try {
       if (!isRefresh) setLoading(true);
       
-      console.log('Fetching route data for:', routeType);
-      
       const [routesRes, ordersRes] = await Promise.all([
-          riderApi.getRoutes({ status: 'active,draft,pending' }).catch(err => { console.warn('Routes fetch failed', err); return { data: { routes: [] } }; }),
-          riderApi.getActiveOrders().catch(err => { console.warn('Orders fetch failed', err); return { data: { orders: [] } }; })
+          riderApi.getRoutes({ status: 'active,draft,pending' }).catch(err => { console.warn('Routes error', err); return { data: { routes: [] } }; }),
+          riderApi.getActiveOrders().catch(err => { console.warn('Orders error', err); return { data: { orders: [] } }; })
       ]);
 
       const routes = routesRes.data?.routes || [];
-      const allOrders = ordersRes.data?.orders || [];
-      setActiveOrders(allOrders);
+      const orders = ordersRes.data?.orders || [];
 
-      // --- 1. Analyze Available Routes for Counts ---
-      // We look for ONE Active route (Urgent) and ONE Pending route (Next Day)
-      // This logic drives the "Badges" on the tab, regardless of what we are viewing
+      // Update Counts
       const activeRoute = routes.find((r: any) => r.status === 'active');
       const pendingRoute = routes.find((r: any) => r.status === 'pending' || r.status === 'draft');
-
       setRouteSpecs({
           urgent: activeRoute?.stops?.length ?? null,
           nextDay: pendingRoute?.stops?.length ?? null
       });
 
-      // --- 2. Determine Current View Content ---
-      let mappedStops: RouteStop[] = [];
-      let usedRoute = false;
-
-      // Decide which route applies to the CURRENT tab
-      const targetRoute = routeType === 'urgent' ? activeRoute : pendingRoute;
-
-      if (targetRoute && targetRoute.stops.length > 0) {
-             console.log('Using Assigned Route for', routeType, ':', targetRoute.id);
-             usedRoute = true;
-             setIsAssignedRoute(true);
-             
-             // First, map basic data
-             mappedStops = targetRoute.stops.map((stop: any, index: number) => {
-                 const shipment = stop.shipment || {};
-                 
-                 // Use real backend estimates if available in shipment, otherwise fallbacks
-                 // Note: Ideally backend should store per-leg time/distance on RouteStop. 
-                 // For now, we use shipment estimates or defaults.
-                 const rawDist = stop.distance || shipment.distanceKm || '0';
-                 
-                 // Improved ETA calculation logic could go here, but for now we keep the sequence
-                 // We can potentially use route.duration_min to offset these if we had start time.
-                 const now = new Date();
-                 now.setMinutes(now.getMinutes() + (index * 20)); 
-
-                 // Robust check: If shipment is delivered, consider stop completed
-                 let effectiveStatus = stop.status;
-                 if (shipment.status === 'delivered') {
-                     effectiveStatus = 'completed';
-                 }
-
-                 return {
-                     id: shipment.id || stop.id,
-                     trackingId: shipment.trackingNumber || '',
-                     recipient: shipment.recipientName || 'Customer',
-                     address: shipment.address || stop.location || '',
-                     // If rawDist is just a number, format it
-                     distance: typeof rawDist === 'number' ? `${rawDist.toFixed(1)} km` : `${parseFloat(rawDist).toFixed(1)} km`,
-                     estimatedTime: `${DEFAULT_STOP_TIME_MIN} min`,
-                     status: effectiveStatus,
-                     type: routeType,
-                     eta: now.toLocaleTimeString([], { hour: '2-digit', minute:'2-digit'}),
-                     stopNumber: stop.stopOrder,
-                     latitude: parseFloat(stop.latitude),
-                     longitude: parseFloat(stop.longitude),
-                     shipmentStatus: shipment.status // Keep track of raw shipment status
-                 };
-             });
-
-             // Logic to determine "Active" stop (First non-completed)
-             let activeFound = false;
-             let newCurrentIndex = 0;
-
-             mappedStops = mappedStops.map((stop, index) => {
-                 if (stop.status === 'completed') {
-                     return stop;
-                 }
-                 
-                 // The first one we find that is NOT completed becomes Active
-                 if (!activeFound) {
-                     activeFound = true;
-                     newCurrentIndex = index;
-                     return { ...stop, status: 'active' };
-                 }
-
-                 // All subsequent non-completed stops are Pending
-                 return { ...stop, status: 'pending' };
-             });
-             
-             // If all are completed, show the last one? or keep index 0? 
-             // Usually if all completed, we might stay on last or show summary. 
-             // For now, let's keep the calculated index.
-             setCurrentStopIndex(newCurrentIndex);
-      }
-
-      // --- 3. Fallback to Local Optimization ---
-      if (!usedRoute) {
-          console.log('Using local optimization for:', routeType);
-          setIsAssignedRoute(false);
-          const filtered = filterOrdersByType(allOrders, routeType);
-          const optimized = optimizeRoute(filtered);
-          mappedStops = mapToRouteStops(optimized, routeType);
-          
-          // Apply same sequential logic to local fallback
-           let activeFound = false;
-           let newCurrentIndex = 0;
-
-           mappedStops = mappedStops.map((stop, index) => {
-               if (stop.status === 'completed') return stop;
-               if (!activeFound) {
-                   activeFound = true;
-                   newCurrentIndex = index;
-                   return { ...stop, status: 'active' };
-               }
-               return { ...stop, status: 'pending' };
-           });
-           setCurrentStopIndex(newCurrentIndex);
-      }
-
-      setStops(mappedStops);
-      calculateStats(mappedStops);
+      setRawRoutes(routes);
+      setActiveOrders(orders);
 
     } catch (error: any) {
-      console.error('RoutePlanning: Fetch Error', error);
-      Alert.alert('Error', error.message || 'Failed to load route data.');
+      console.error('Data Fetch Error', error);
+      Alert.alert('Error', 'Failed to load data.');
     } finally {
       setLoading(false);
       if (isRefresh) setRefreshing(false);
     }
-  }, [routeType, filterOrdersByType, optimizeRoute, mapToRouteStops, calculateStats]);
+  }, []);
 
-  // Effects
+  // --- Location Watcher ---
+  useEffect(() => {
+      let subscription: Location.LocationSubscription;
+      (async () => {
+          try {
+            const { status } = await Location.requestForegroundPermissionsAsync();
+            if (status !== 'granted') {
+                console.warn('Location permission denied');
+                return;
+            }
+            
+            // Initial
+            const loc = await Location.getCurrentPositionAsync({});
+            setCurrentLocation({ lat: loc.coords.latitude, lng: loc.coords.longitude });
+            
+            // Watch
+            subscription = await Location.watchPositionAsync(
+                { 
+                    accuracy: Location.Accuracy.High, 
+                    distanceInterval: 100 // Update every 100 meters to avoid jitter
+                },
+                (newLoc) => {
+                    console.log('Location Update:', newLoc.coords.latitude, newLoc.coords.longitude);
+                    setCurrentLocation({ lat: newLoc.coords.latitude, lng: newLoc.coords.longitude });
+                }
+            );
+          } catch(e) {
+              console.error('Location service error', e);
+          }
+      })();
+      return () => {
+          if (subscription) subscription.remove();
+      };
+  }, []);
+
+  // Initial Fetch
   useEffect(() => {
     fetchRouteData();
   }, [fetchRouteData]);
@@ -335,39 +396,29 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
     fetchRouteData(true);
   }, [fetchRouteData]);
 
-
-  // --- Actions ---
+  // Actions
   const handleStartNavigation = useCallback((stop?: RouteStop) => {
-    // ... existing ...
     const target = stop || stops[currentStopIndex];
     if (!target) return;
 
     const lat = target.latitude;
     const lng = target.longitude;
     const label = encodeURIComponent(target.recipient);
+    
+    // Construct Google Maps URL (or platform specific)
+    const scheme = Platform.select({ ios: 'maps:0,0?q=', android: 'geo:0,0?q=' });
+    const latLng = lat && lng ? `${lat},${lng}` : target.address;
+    const url = Platform.select({
+      ios: `${scheme}${label}@${latLng}`,
+      android: `${scheme}${latLng}(${label})`
+    });
 
-    let url = '';
-    if (lat && lng) {
-      const latLng = `${lat},${lng}`;
-      url = Platform.select({
-        ios: `maps:0,0?q=${label}@${latLng}`,
-        android: `geo:0,0?q=${latLng}(${label})`
-      }) || '';
-    } else {
-      url = Platform.select({
-        ios: `maps:0,0?q=${encodeURIComponent(target.address)}`,
-        android: `geo:0,0?q=${encodeURIComponent(target.address)}`
-      }) || '';
-    }
-
-    Linking.openURL(url).catch(() => {
-       const query = (lat && lng) ? `${lat},${lng}` : target.address;
-       Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`);
+    Linking.openURL(url || '').catch(() => {
+        Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(latLng as string)}`);
     });
   }, [stops, currentStopIndex]);
 
   const handleViewFullRoute = useCallback(() => {
-     // ... existing ...
      if (stops.length === 0) {
         Alert.alert('Empty Route', 'No stops to map.');
         return;
@@ -378,12 +429,19 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
 
      const destination = activeStops[activeStops.length - 1];
      const waypoints = activeStops.slice(0, activeStops.length - 1);
-
+     
+     // Optimize waypoints order in GMaps too?
+     // Since we already optimized locally, passing them in order is fine.
+     
      let destQuery = destination.latitude && destination.longitude 
         ? `${destination.latitude},${destination.longitude}`
         : encodeURIComponent(destination.address);
 
-     let url = `https://www.google.com/maps/dir/?api=1&destination=${destQuery}`;
+     let url = `https://www.google.com/maps/dir/?api=1&destination=${destQuery}&travelmode=driving`;
+     
+     if (currentLocation) {
+         url += `&origin=${currentLocation.lat},${currentLocation.lng}`;
+     }
 
      if (waypoints.length > 0) {
         const wpQueries = waypoints.map(wp => 
@@ -395,10 +453,8 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
      }
      
      Linking.openURL(url);
-  }, [stops]);
+  }, [stops, currentLocation]);
 
-  // Counts for the tabs
-  // Dynamic: Use RouteSpecs if available, else Fallback to Orders
   const urgentCount = useMemo(() => 
       routeSpecs.urgent !== null ? routeSpecs.urgent : filterOrdersByType(activeOrders, 'urgent').length, 
   [activeOrders, filterOrdersByType, routeSpecs.urgent]);

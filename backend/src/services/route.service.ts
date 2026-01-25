@@ -341,6 +341,16 @@ export class RouteService {
 
            await tx.routeStop.createMany({ data: stopsData });
 
+           // Update Shipments Status to Assigned
+           const shipmentIds = batch.map(s => s.id);
+           await tx.shipment.updateMany({
+               where: { id: { in: shipmentIds } },
+               data: { 
+                   status: 'assigned',
+                   rider_id: rider.id
+               }
+           });
+
            routesCreated++;
            shipmentIndex += MAX_PER_ROUTE;
            riderIndex++;

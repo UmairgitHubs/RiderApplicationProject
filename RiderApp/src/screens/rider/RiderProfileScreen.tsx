@@ -31,7 +31,7 @@ export default function RiderProfileScreen() {
 
       // Fetch profile
       const profileResponse = await profileApi.getProfile();
-      const profileData = profileResponse?.data?.profile || {};
+      const profileData = (profileResponse as any)?.data?.profile || {};
       setProfile(profileData);
 
       // Fetch earnings for performance stats
