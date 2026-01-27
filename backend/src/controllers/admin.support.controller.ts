@@ -215,7 +215,9 @@ export const replyToTicket = asyncHandler(async (req: AuthRequest, res: Response
 
   // Emit real-time notification via Socket.io
   if (result.newMessage) {
-    io.to(`user:${ticket.user_id}`).emit('support:new-message', {
+    const room = `user:${ticket.user_id}`;
+    logger.info(`📢 Emitting 'support:new-message' to room: ${room} for Ticket: ${id}`);
+    io.to(room).emit('support:new-message', {
       ticketId: id,
       message: result.newMessage
     });

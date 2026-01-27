@@ -1,6 +1,7 @@
 import admin from 'firebase-admin';
 import { config } from '../config/env';
 import { logger } from '../utils/logger';
+require("dotenv").config();
 
 if (config.firebase.projectId && config.firebase.clientEmail && config.firebase.privateKey) {
   try {
@@ -8,7 +9,7 @@ if (config.firebase.projectId && config.firebase.clientEmail && config.firebase.
       credential: admin.credential.cert({
         projectId: config.firebase.projectId,
         clientEmail: config.firebase.clientEmail,
-        privateKey: config.firebase.privateKey,
+        privateKey: config.firebase.privateKey.replace(/\\n/g, "\n"),
       }),
     });
     logger.info('Firebase Admin initialized successfully');

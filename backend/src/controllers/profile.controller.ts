@@ -64,12 +64,16 @@ export const getProfile = async (req: Request, res: Response) => {
       profile.cnic = user.rider.cnic;
       profile.licenseNumber = user.rider.license_number;
       profile.vehicleType = user.rider.vehicle_type;
+      profile.vehicleModel = user.rider.vehicle_model;
+      profile.vehicleColor = user.rider.vehicle_color;
       profile.vehicleNumber = user.rider.vehicle_number;
       profile.isOnline = user.rider.is_online;
       profile.walletBalance = user.rider.wallet_balance;
       profile.totalEarnings = user.rider.total_earnings;
       profile.rating = user.rider.rating;
       profile.totalDeliveries = user.rider.total_deliveries;
+      profile.emergencyContactName = user.rider.emergency_contact_name;
+      profile.emergencyContactPhone = user.rider.emergency_contact_phone;
     }
 
     res.json({
@@ -113,9 +117,15 @@ export const updateProfile = async (req: Request, res: Response) => {
       cnic,
       licenseNumber,
       vehicleType,
+      vehicleModel,
+      vehicleColor,
       vehicleNumber,
       address,
+      emergencyContactName,
+      emergencyContactPhone,
     } = req.body;
+
+    logger.info(`📝 Received Profile Update Request for ${userId}:`, JSON.stringify(req.body));
 
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -193,7 +203,11 @@ export const updateProfile = async (req: Request, res: Response) => {
           ...(cnic && { cnic }),
           ...(licenseNumber && { license_number: licenseNumber }),
           ...(vehicleType && { vehicle_type: vehicleType }),
+          ...(vehicleModel && { vehicle_model: vehicleModel }),
+          ...(vehicleColor && { vehicle_color: vehicleColor }),
           ...(vehicleNumber && { vehicle_number: vehicleNumber }),
+          ...(emergencyContactName !== undefined && { emergency_contact_name: emergencyContactName }),
+          ...(emergencyContactPhone !== undefined && { emergency_contact_phone: emergencyContactPhone }),
         },
       });
     }

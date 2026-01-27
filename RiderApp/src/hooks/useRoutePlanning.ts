@@ -12,6 +12,7 @@ export interface RouteStop {
   estimatedTime: string;
   status: 'active' | 'pending' | 'completed';
   type: 'urgent' | 'nextDay';
+  taskType: 'pickup' | 'delivery';
   eta?: string;
   stopNumber: number;
   latitude?: number;
@@ -29,6 +30,9 @@ export interface RouteStats {
 const EARTH_RADIUS_KM = 6371;
 const DEFAULT_STOP_TIME_MIN = 12;
 const DEFAULT_START_LOCATION = { lat: 33.6844, lng: 73.0479 }; // Islamabad
+const AVERAGE_SPEED_KMPH = 30; // Average city driving speed
+const ROAD_FACTOR = 1.3; // Aproximation for non-straight roads
+const DEFAULT_SERVICE_TIME_MIN = 15;
 
 export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgent') => {
   const [routeType, setRouteType] = useState<'urgent' | 'nextDay'>(initialRouteType);
@@ -91,18 +95,7 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
   // Helper to fetch real driving metrics for a single leg (Active Stop)
   const fetchPreciseMetrics = async (originLat: number, originLng: number, destLat: number, destLng: number) => {
       try {
-          // Use the global config or environment variable for key if accessible, 
-          // but usually in React Native we use Expo Constants or .env. 
-          // For now, assuming the key is needed. If we can't get it easily here without passing it down, 
-          // we might have to rely on the backend. 
-          // However, we can use the 'distance' from the backend IF we haven't re-sorted.
-          // Since we re-sorted, we must recalculate. 
-          
-          // Fallback to purely dynamic calculation if we don't want to expose KEY or make 50 calls.
           return null; 
-          // Note: Implementing client-side GMaps fetch requires the key.
-          // If the user wants "Completely Integrated", relying on the smart estimation below is safer 
-          // than exposing keys or hitting rate limits, UNLESS we call our backend to calculate it.
       } catch (e) { return null; }
   };
 
@@ -114,7 +107,55 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
     let currentLat = startLat;
     let currentLng = startLng;
     let stopOrderCounter = 1;
-    let accumulatedTimeMin = 0; // Track cumulative time
+    let accumulatedTimeMin = 0;
+
+    // Validate Start Location
+    if (!currentLat || !currentLng) {
+        currentLat = 0;
+        currentLng = 0;
+    }
+
+    // Helper to get coords and info based on task type
+    const getStopInfo = (item: any) => {
+        const shipment = item.shipment || item;
+        // Determine task type: explicitly from route stop, or infer from shipment status
+        let taskType: 'pickup' | 'delivery' = 'delivery'; // Default
+        
+        if (item.type && (item.type === 'pickup' || item.type === 'delivery')) {
+            taskType = item.type;
+        } else if (shipment.status === 'assigned' || shipment.status === 'pending') {
+            // If just assigned/pending and no explicit route stop type, assume pickup? 
+            // Or if we are in 'activeOrders' mode (no route), 'assigned' usually means we need to pick it up.
+            // But 'pending' means unassigned?
+            // Let's stick to: if explicit type exists, use it. Else check status.
+            taskType = (shipment.status === 'picked_up' || shipment.status === 'in_transit') ? 'delivery' : 'pickup';
+        }
+
+        // Get Coords based on taskType
+        let latVal, lngVal, address;
+        
+        if (taskType === 'pickup') {
+            latVal = item.latitude || shipment.pickupLatitude || shipment.pickup_latitude;
+            lngVal = item.longitude || shipment.pickupLongitude || shipment.pickup_longitude;
+            address = item.location || shipment.pickupAddress || shipment.pickup_address;
+        } else {
+            latVal = item.latitude || shipment.deliveryLatitude || shipment.delivery_latitude;
+            lngVal = item.longitude || shipment.deliveryLongitude || shipment.delivery_longitude;
+            address = item.location || shipment.deliveryAddress || shipment.delivery_address || shipment.address;
+        }
+        
+        // Fallbacks if specific ones missing (e.g. item.latitude might be the correct one regardless of type if provided by backend stop)
+        if (!latVal) latVal = item.latitude || shipment.latitude;
+        if (!lngVal) lngVal = item.longitude || shipment.longitude;
+        if (!address) address = item.location || shipment.address;
+
+        return {
+            lat: parseFloat(latVal || '0'),
+            lng: parseFloat(lngVal || '0'),
+            address: address || '',
+            taskType
+        };
+    };
 
     while (unvisited.length > 0) {
       let nearestIndex = -1;
@@ -122,17 +163,12 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
 
       for (let i = 0; i < unvisited.length; i++) {
         const order = unvisited[i];
-        const shipment = order.shipment || order; 
-        
-        const latVal = order.latitude || order.deliveryLatitude || shipment.delivery_latitude;
-        const lngVal = order.longitude || order.deliveryLongitude || shipment.delivery_longitude;
-        
-        const oLat = parseFloat(latVal || '0');
-        const oLng = parseFloat(lngVal || '0');
+        const { lat, lng } = getStopInfo(order);
 
-        if (oLat === 0 && oLng === 0) continue;
+        if (lat === 0 && lng === 0) continue;
 
-        const dist = calculateDistance(currentLat, currentLng, oLat, oLng);
+        const dist = (currentLat === 0 && currentLng === 0) ? 0 : calculateDistance(currentLat, currentLng, lat, lng);
+        
         if (dist < minDist) {
           minDist = dist;
           nearestIndex = i;
@@ -142,22 +178,14 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
       if (nearestIndex !== -1) {
         const nearest = unvisited[nearestIndex];
         const shipment = nearest.shipment || nearest;
-
-        const latVal = nearest.latitude || nearest.deliveryLatitude || shipment.delivery_latitude;
-        const lngVal = nearest.longitude || nearest.deliveryLongitude || shipment.delivery_longitude;
-        const stopLat = parseFloat(latVal || '0');
-        const stopLng = parseFloat(lngVal || '0');
+        const { lat, lng, address, taskType } = getStopInfo(nearest);
         
-        // Dynamic Service Time from Backend
-        // If 'estimated_delivery_time' is stored in backend as minutes, use it.
-        // Usually it might be "15" or "20". Default to 15 if missing.
-        const serviceTimeDiff = parseInt(shipment.estimatedDeliveryTime || shipment.estimated_delivery_time || shipment.estimatedTime || '15');
+        // Dynamic Service Time
+        const serviceTimeDiff = parseInt(shipment.estimatedDeliveryTime || shipment.estimated_delivery_time || shipment.estimatedTime || String(DEFAULT_SERVICE_TIME_MIN));
         
-        // Travel Time Estimation:
-        // Assume avg speed 30km/h in city -> 0.5 km/min.
-        // Apply 1.3x factor for road curvature on the Haversine distance.
-        const roadDistanceKm = minDist * 1.3;
-        const travelTimeMin = (roadDistanceKm / 30) * 60; 
+        // Travel Time Estimation
+        const roadDistanceKm = minDist * ROAD_FACTOR;
+        const travelTimeMin = (roadDistanceKm / AVERAGE_SPEED_KMPH) * 60; 
         
         accumulatedTimeMin += Math.round(travelTimeMin + serviceTimeDiff);
 
@@ -169,25 +197,27 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
             id: shipment.id || nearest.id,
             trackingId: shipment.trackingNumber || shipment.tracking_number || '',
             recipient: shipment.recipientName || shipment.recipient_name || 'Customer',
-            address: shipment.address || shipment.deliveryAddress || shipment.delivery_address || '',
+            address: address,
             distance: `${roadDistanceKm.toFixed(1)} km`, 
             estimatedTime: `${serviceTimeDiff} min`,
             status: 'pending', 
-            type,
+            type, // Route Type (Urgent/NextDay)
+            taskType, // Pickup/Delivery
             eta: now.toLocaleTimeString([], { hour: '2-digit', minute:'2-digit'}),
             stopNumber: stopOrderCounter,
-            latitude: stopLat,
-            longitude: stopLng,
+            latitude: lat,
+            longitude: lng,
         });
 
-        currentLat = stopLat;
-        currentLng = stopLng;
+        currentLat = lat;
+        currentLng = lng;
         stopOrderCounter++;
         unvisited.splice(nearestIndex, 1);
       } else {
-        // Handle invalid coords
+        // Handle remaining items with invalid coords
         unvisited.forEach(u => {
              const s = u.shipment || u;
+             const { taskType } = getStopInfo(u);
              optimizedStops.push({
                  id: s.id || u.id,
                  trackingId: s.trackingNumber || '',
@@ -197,6 +227,7 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
                  estimatedTime: 'N/A',
                  status: 'pending',
                  type,
+                 taskType,
                  eta: 'N/A',
                  stopNumber: stopOrderCounter++,
                  latitude: 0,
@@ -208,7 +239,6 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
     }
     return optimizedStops;
   }, [calculateDistance]);
-
 
   const calculateStats = useCallback((stopsList: RouteStop[], overrides?: { totalKm?: number, totalMinutes?: number }) => {
     const totalKm = overrides?.totalKm ?? stopsList.reduce((sum, stop) => sum + (parseFloat(stop.distance) || 0), 0);
@@ -260,6 +290,7 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
                  estimatedTime: '0 min',
                  status: 'completed',
                  type: routeType,
+                 taskType: s.type || ((s.shipment?.status === 'picked_up' || s.shipment?.status === 'in_transit') ? 'delivery' : 'pickup'),
                  eta: 'Completed',
                  stopNumber: i + 1,
                  latitude: parseFloat(s.latitude),
@@ -307,8 +338,8 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
          
          // Stats
          const overrides = (usedRoute && targetRoute) ? {
-            totalKm: targetRoute.distance_km ? Number(targetRoute.distance_km) : undefined,
-            totalMinutes: targetRoute.duration_min ? Number(targetRoute.duration_min) : undefined
+            totalKm: targetRoute.distance || targetRoute.distance_km ? Number(targetRoute.distance || targetRoute.distance_km) : undefined,
+            totalMinutes: targetRoute.duration || targetRoute.duration_min ? Number(targetRoute.duration || targetRoute.duration_min) : undefined
         } : undefined;
         
         calculateStats(finalStops, overrides);

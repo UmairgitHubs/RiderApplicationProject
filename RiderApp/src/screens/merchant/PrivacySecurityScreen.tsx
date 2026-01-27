@@ -9,6 +9,7 @@ import {
   Platform,
   Switch,
   Alert,
+  Share,
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -131,9 +132,13 @@ export default function PrivacySecurityScreen() {
           // Explicitly casting or checking API payload in api.ts
           // updateProfile accepts notifSystemUpdates
           const response: any = await profileApi.updateProfile({ notifSystemUpdates: value });
-          if (!response.success) setLoginAlerts(original);
+          if (!response.success) {
+             setLoginAlerts(original);
+             Alert.alert('Error', 'Failed to update login alert preferences');
+          }
       } catch (e) {
           setLoginAlerts(original);
+          Alert.alert('Error', 'Failed to update login alert preferences');
       }
   };
 
@@ -142,9 +147,13 @@ export default function PrivacySecurityScreen() {
       setEmailNotifications(value);
       try {
           const response: any = await profileApi.updateProfile({ emailNotifications: value });
-          if (!response.success) setEmailNotifications(original);
+          if (!response.success) {
+            setEmailNotifications(original);
+            Alert.alert('Error', 'Failed to update email preferences');
+          }
       } catch (e) {
           setEmailNotifications(original);
+          Alert.alert('Error', 'Failed to update email preferences');
       }
   };
 
@@ -153,9 +162,13 @@ export default function PrivacySecurityScreen() {
       setSmsAlerts(value);
       try {
           const response: any = await profileApi.updateProfile({ smsNotifications: value });
-          if (!response.success) setSmsAlerts(original);
+          if (!response.success) {
+            setSmsAlerts(original);
+            Alert.alert('Error', 'Failed to update SMS preferences');
+          }
       } catch (e) {
           setSmsAlerts(original);
+          Alert.alert('Error', 'Failed to update SMS preferences');
       }
   };
 
@@ -169,16 +182,38 @@ export default function PrivacySecurityScreen() {
           text: 'Request Export',
           onPress: async () => {
             try {
-                // In a real app, this might trigger a download or email
+                // Fetch data from backend
                 const response: any = await profileApi.exportData();
-                if (response.success) {
-                    Alert.alert('Export Ready', 'Your data has been exported successfully. In a real app, this would download a JSON file or send an email.');
-                    // console.log("Exported Data:", response.data); 
+                
+                if (response.success && response.data) {
+                    const jsonData = JSON.stringify(response.data, null, 2);
+                    
+                    // Share the data using native sharing
+                    try {
+                      const result = await Share.share({
+                        title: 'My RiderApp Data',
+                        message: jsonData,
+                        // url: ... if we had a file url
+                      });
+
+                      if (result.action === Share.sharedAction) {
+                        if (result.activityType) {
+                          // shared with activity type of result.activityType
+                        } else {
+                          // shared
+                        }
+                      } else if (result.action === Share.dismissedAction) {
+                        // dismissed
+                      }
+                    } catch (error: any) {
+                      Alert.alert('Error', 'Failed to share data: ' + error.message);
+                    }
                 } else {
-                    Alert.alert('Error', 'Failed to export data');
+                    Alert.alert('Error', 'Failed to export data from server.');
                 }
             } catch (error) {
-                Alert.alert('Error', 'Failed to export data');
+                console.error('Export error:', error);
+                Alert.alert('Error', 'Failed to export data: Check your connection.');
             }
           },
         },

@@ -395,6 +395,10 @@ export const profileApi = {
     notifPayments?: boolean;
     notifPromotions?: boolean;
     notifSystemUpdates?: boolean;
+    vehicleType?: string;
+    vehicleModel?: string;
+    vehicleColor?: string;
+    vehicleNumber?: string;
   }) => {
     return api.patch("/profile", data);
   },
@@ -598,6 +602,28 @@ export const riderApi = {
     return api.get<ApiResponse>(`/rider/earnings${queryString}`);
   },
 
+  // Get performance stats
+  getPerformanceStats: async (params?: {
+    startDate?: string;
+    endDate?: string;
+  }) => {
+     const cleanParams: any = {};
+    if (params?.startDate) cleanParams.startDate = params.startDate;
+    if (params?.endDate) cleanParams.endDate = params.endDate;
+    
+    const queryString = Object.keys(cleanParams).length > 0
+      ? "?" + new URLSearchParams(cleanParams).toString()
+      : "";
+    return api.get<{
+      success: boolean;
+      data: {
+        deliveries: number;
+        onTimeRate: number;
+        rating: number;
+      };
+    }>(`/rider/performance-stats${queryString}`);
+  },
+
   // Get completed orders (recent deliveries)
   getCompletedOrders: async (params?: {
     page?: number;
@@ -640,22 +666,22 @@ export const notificationsApi = {
     const queryString = params
       ? "?" + new URLSearchParams(params as any).toString()
       : "";
-    return api.get(`/notifications${queryString}`);
+    return api.get<ApiResponse>(`/notifications${queryString}`);
   },
 
   // Mark notification as read
   markAsRead: async (notificationId: string) => {
-    return api.patch(`/notifications/${notificationId}/read`, {});
+    return api.patch<ApiResponse>(`/notifications/${notificationId}/read`, {});
   },
 
   // Mark all notifications as read
   markAllAsRead: async () => {
-    return api.patch("/notifications/read-all", {});
+    return api.patch<ApiResponse>("/notifications/read-all", {});
   },
 
   // Delete notification
   deleteNotification: async (notificationId: string) => {
-    return api.delete(`/notifications/${notificationId}`);
+    return api.delete<ApiResponse>(`/notifications/${notificationId}`);
   },
 };
 

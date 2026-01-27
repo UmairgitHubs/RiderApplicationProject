@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { colors, typography, spacing, borderRadius } from '../../theme';
 import { notificationsApi } from '../../services/api';
+import { useNotificationSettings } from '../../hooks/useNotificationSettings';
 
 interface Notification {
   id: string;
@@ -32,22 +33,17 @@ export default function RiderNotificationsScreen({ navigation: navProp }: any = 
   const navHook = useNavigation<any>();
   const navigation = navProp || navHook;
   const [activeTab, setActiveTab] = useState<'all' | 'settings'>('all');
-  const [loading, setLoading] = useState(true);
+  const [loadingNotifications, setLoadingNotifications] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
 
-  // Settings state
-  const [newOrders, setNewOrders] = useState(true);
-  const [payments, setPayments] = useState(true);
-  const [alerts, setAlerts] = useState(true);
-  const [promotions, setPromotions] = useState(false);
-  const [pushEnabled, setPushEnabled] = useState(true);
-  const [emailEnabled, setEmailEnabled] = useState(true);
+  // Use custom hook for settings
+  const { settings, loading: loadingSettings, updateSetting } = useNotificationSettings();
 
   const fetchNotifications = useCallback(async () => {
     try {
-      setLoading(true);
+      setLoadingNotifications(true);
       const response = await notificationsApi.getNotifications({
         limit: 50,
       });
@@ -59,44 +55,11 @@ export default function RiderNotificationsScreen({ navigation: navProp }: any = 
       }
     } catch (error: any) {
       console.error('Error fetching notifications:', error);
-      // Use fallback data if API fails
-      setNotifications([
-        {
-          id: '1',
-          title: 'New Delivery Request',
-          message: 'You have a new delivery request in Manhattan',
-          type: 'delivery',
-          isRead: false,
-          createdAt: new Date(Date.now() - 5 * 60000).toISOString(),
-        },
-        {
-          id: '2',
-          title: 'Payment Received',
-          message: '$45.50 has been added to your wallet',
-          type: 'payment',
-          isRead: false,
-          createdAt: new Date(Date.now() - 60 * 60000).toISOString(),
-        },
-        {
-          id: '3',
-          title: 'Delivery Completed',
-          message: 'Customer rated your delivery 5 stars!',
-          type: 'delivery',
-          isRead: true,
-          createdAt: new Date(Date.now() - 3 * 60 * 60000).toISOString(),
-        },
-        {
-          id: '4',
-          title: 'Document Expiring Soon',
-          message: 'Your vehicle insurance expires in 30 days',
-          type: 'alert',
-          isRead: true,
-          createdAt: new Date(Date.now() - 24 * 60 * 60000).toISOString(),
-        },
-      ]);
-      setUnreadCount(2);
+      // Fallback mock data
+      setNotifications([]);
+      setUnreadCount(0);
     } finally {
-      setLoading(false);
+      setLoadingNotifications(false);
       setRefreshing(false);
     }
   }, []);
@@ -120,7 +83,6 @@ export default function RiderNotificationsScreen({ navigation: navProp }: any = 
     try {
       const response = await notificationsApi.markAllAsRead();
       if (response.success) {
-        // Update local state
         setNotifications(notifications.map(n => ({ ...n, isRead: true })));
         setUnreadCount(0);
       }
@@ -134,7 +96,6 @@ export default function RiderNotificationsScreen({ navigation: navProp }: any = 
     if (!notification.isRead) {
       try {
         await notificationsApi.markAsRead(notification.id);
-        // Update local state
         setNotifications(notifications.map(n => 
           n.id === notification.id ? { ...n, isRead: true } : n
         ));
@@ -144,7 +105,6 @@ export default function RiderNotificationsScreen({ navigation: navProp }: any = 
       }
     }
 
-    // Navigate based on notification type
     if (notification.referenceType === 'shipment' && notification.referenceId) {
       const parent = navigation.getParent();
       if (parent) {
@@ -233,7 +193,7 @@ export default function RiderNotificationsScreen({ navigation: navProp }: any = 
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
         >
-          {loading && !refreshing ? (
+          {loadingNotifications && !refreshing ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" color="#4CAF50" />
             </View>
@@ -292,105 +252,125 @@ export default function RiderNotificationsScreen({ navigation: navProp }: any = 
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          {/* Notification Preferences */}
-          <Text style={styles.sectionTitle}>NOTIFICATION PREFERENCES</Text>
-          
-          <View style={styles.settingCard}>
-            <View style={styles.settingItem}>
-              <View style={styles.settingLeft}>
-                <Text style={styles.settingLabel}>New Orders</Text>
-                <Text style={styles.settingDescription}>
-                  Get notified of new delivery requests
-                </Text>
-              </View>
-              <Switch
-                value={newOrders}
-                onValueChange={setNewOrders}
-                trackColor={{ false: '#767577', true: '#FF6B00' }}
-                thumbColor={colors.textWhite}
-              />
-            </View>
-
-            <View style={styles.settingItem}>
-              <View style={styles.settingLeft}>
-                <Text style={styles.settingLabel}>Payments</Text>
-                <Text style={styles.settingDescription}>
-                  Notifications about earnings and payments
-                </Text>
-              </View>
-              <Switch
-                value={payments}
-                onValueChange={setPayments}
-                trackColor={{ false: '#767577', true: '#FF6B00' }}
-                thumbColor={colors.textWhite}
-              />
-            </View>
-
-            <View style={styles.settingItem}>
-              <View style={styles.settingLeft}>
-                <Text style={styles.settingLabel}>Alerts</Text>
-                <Text style={styles.settingDescription}>
-                  Important alerts and reminders
-                </Text>
-              </View>
-              <Switch
-                value={alerts}
-                onValueChange={setAlerts}
-                trackColor={{ false: '#767577', true: '#FF6B00' }}
-                thumbColor={colors.textWhite}
-              />
-            </View>
-
-            <View style={styles.settingItem}>
-              <View style={styles.settingLeft}>
-                <Text style={styles.settingLabel}>Promotions</Text>
-                <Text style={styles.settingDescription}>
-                  News and promotional offers
-                </Text>
-              </View>
-              <Switch
-                value={promotions}
-                onValueChange={setPromotions}
-                trackColor={{ false: '#767577', true: '#FF6B00' }}
-                thumbColor={colors.textWhite}
-              />
-            </View>
-          </View>
-
-          {/* Delivery Channels */}
-          <Text style={styles.sectionTitle}>DELIVERY CHANNELS</Text>
-          
-          <View style={styles.settingCard}>
-            <View style={styles.channelItem}>
-              <View style={styles.channelLeft}>
-                <View style={[styles.channelIcon, { backgroundColor: '#E3F2FD' }]}>
-                  <Ionicons name="notifications" size={20} color="#2196F3" />
+          {loadingSettings ? (
+            <View style={styles.loadingContainer}>
+               <ActivityIndicator size="large" color={colors.primary} />
+            </View> 
+          ) : (
+            <>
+              <Text style={styles.sectionTitle}>NOTIFICATION PREFERENCES</Text>
+              
+              <View style={styles.settingCard}>
+                <View style={styles.settingItem}>
+                  <View style={styles.settingLeft}>
+                    <Text style={styles.settingLabel}>New Orders</Text>
+                    <Text style={styles.settingDescription}>
+                      Get notified of new delivery requests
+                    </Text>
+                  </View>
+                  <Switch
+                    value={settings.newOrders}
+                    onValueChange={(val) => updateSetting('newOrders', val)}
+                    trackColor={{ false: '#767577', true: '#FF6B00' }}
+                    thumbColor={colors.textWhite}
+                  />
                 </View>
-                <View>
-                  <Text style={styles.channelLabel}>Push Notifications</Text>
-                  <Text style={styles.channelSubtitle}>Enabled</Text>
+
+                <View style={styles.settingItem}>
+                  <View style={styles.settingLeft}>
+                    <Text style={styles.settingLabel}>Payments</Text>
+                    <Text style={styles.settingDescription}>
+                      Notifications about earnings and payments
+                    </Text>
+                  </View>
+                  <Switch
+                    value={settings.payments}
+                    onValueChange={(val) => updateSetting('payments', val)}
+                    trackColor={{ false: '#767577', true: '#FF6B00' }}
+                    thumbColor={colors.textWhite}
+                  />
+                </View>
+
+                <View style={styles.settingItem}>
+                  <View style={styles.settingLeft}>
+                    <Text style={styles.settingLabel}>Alerts</Text>
+                    <Text style={styles.settingDescription}>
+                      Important alerts and reminders
+                    </Text>
+                  </View>
+                  <Switch
+                    value={settings.deliveryAlerts}
+                    onValueChange={(val) => updateSetting('deliveryAlerts', val)}
+                    trackColor={{ false: '#767577', true: '#FF6B00' }}
+                    thumbColor={colors.textWhite}
+                  />
+                </View>
+
+                <View style={styles.settingItem}>
+                  <View style={styles.settingLeft}>
+                    <Text style={styles.settingLabel}>Promotions</Text>
+                    <Text style={styles.settingDescription}>
+                      News and promotional offers
+                    </Text>
+                  </View>
+                  <Switch
+                    value={settings.promotions}
+                    onValueChange={(val) => updateSetting('promotions', val)}
+                    trackColor={{ false: '#767577', true: '#FF6B00' }}
+                    thumbColor={colors.textWhite}
+                  />
                 </View>
               </View>
-              {pushEnabled && (
-                <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />
-              )}
-            </View>
 
-            <View style={styles.channelItem}>
-              <View style={styles.channelLeft}>
-                <View style={[styles.channelIcon, { backgroundColor: '#F3E5F5' }]}>
-                  <Ionicons name="mail" size={20} color="#9C27B0" />
-                </View>
-                <View>
-                  <Text style={styles.channelLabel}>Email</Text>
-                  <Text style={styles.channelSubtitle}>Enabled</Text>
-                </View>
+              <Text style={styles.sectionTitle}>DELIVERY CHANNELS</Text>
+              
+              <View style={styles.settingCard}>
+                <TouchableOpacity 
+                   style={styles.channelItem}
+                   onPress={() => updateSetting('pushEnabled', !settings.pushEnabled)}
+                >
+                  <View style={styles.channelLeft}>
+                    <View style={[styles.channelIcon, { backgroundColor: '#E3F2FD' }]}>
+                      <Ionicons name="notifications" size={20} color="#2196F3" />
+                    </View>
+                    <View>
+                      <Text style={styles.channelLabel}>Push Notifications</Text>
+                      <Text style={styles.channelSubtitle}>
+                        {settings.pushEnabled ? 'Enabled' : 'Disabled'}
+                      </Text>
+                    </View>
+                  </View>
+                  {settings.pushEnabled ? (
+                    <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />
+                  ) : (
+                    <Ionicons name="ellipse-outline" size={24} color="#BDBDBD" />
+                  )}
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                   style={styles.channelItem}
+                   onPress={() => updateSetting('emailEnabled', !settings.emailEnabled)}
+                >
+                  <View style={styles.channelLeft}>
+                    <View style={[styles.channelIcon, { backgroundColor: '#F3E5F5' }]}>
+                      <Ionicons name="mail" size={20} color="#9C27B0" />
+                    </View>
+                    <View>
+                      <Text style={styles.channelLabel}>Email</Text>
+                      <Text style={styles.channelSubtitle}>
+                         {settings.emailEnabled ? 'Enabled' : 'Disabled'}
+                      </Text>
+                    </View>
+                  </View>
+                  {settings.emailEnabled ? (
+                    <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />
+                  ) : (
+                    <Ionicons name="ellipse-outline" size={24} color="#BDBDBD" />
+                  )}
+                </TouchableOpacity>
               </View>
-              {emailEnabled && (
-                <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />
-              )}
-            </View>
-          </View>
+            </>
+          )}
         </ScrollView>
       )}
     </View>

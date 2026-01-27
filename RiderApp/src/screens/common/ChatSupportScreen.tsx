@@ -49,7 +49,11 @@ export default function ChatSupportScreen({ navigation }: any) {
   useEffect(() => {
     loadConversation();
     loadSystemInfo();
-    setupSocket();
+    
+    // Connect socket on mount
+    socketService.connect().then(() => {
+        setupSocket();
+    });
 
     return () => {
       const socket = socketService.getSocket();
@@ -59,21 +63,41 @@ export default function ChatSupportScreen({ navigation }: any) {
     };
   }, []);
 
+  // Force socket to reconnect ensuring latest token
   const setupSocket = async () => {
-    const socket = await socketService.connect();
-    if (socket) {
-      socket.on('support:new-message', (data: any) => {
+    try {
+        console.log('🔄 ChatSupport: initializing socket connection...');
+        // Disconnect existing to force re-auth
+        socketService.disconnect();
+        
+        const socket = await socketService.connect();
+        if (socket) {
+            console.log('✅ ChatSupport: Socket connected ID:', socket.id);
+            
+            // Remove any existing listeners to prevent duplicates
+            socket.off('support:new-message');
+            
+            socket.on('support:new-message', (data: any) => {
+        console.log('📩 Socket event received: support:new-message', data);
         const currentConvId = conversationIdRef.current;
+        // Check for ticket ID match (both direct and nested)
         if (data.ticketId === currentConvId || (data.message && data.message.ticket_id === currentConvId)) {
           const newMsg = data.message;
+          console.log('🔔 Received real-time message:', newMsg);
+
           setMessages((prev) => {
             const exists = prev.some(m => m.id === newMsg.id);
             if (exists) return prev;
-            
+
+            // Determine if sender is support/admin
+            // Handle both flattened senderRole and nested sender.role
+            const senderRole = newMsg.senderRole || newMsg.sender?.role || 'user';
+            const isSupport = senderRole === 'support' || senderRole === 'admin' || String(senderRole).includes('admin');
+
             return [{
               id: newMsg.id,
               text: newMsg.message || newMsg.text,
-              sender: "support",
+              sender: isSupport ? "support" : "user",
               timestamp: formatTime(newMsg.created_at || newMsg.createdAt),
               isRead: false,
               createdAt: newMsg.created_at || newMsg.createdAt
@@ -81,8 +105,15 @@ export default function ChatSupportScreen({ navigation }: any) {
           });
         }
       });
+
+      socket.on('disconnect', () => {
+        console.log('❌ ChatSupport: Socket disconnected');
+      });
     }
-  };
+  } catch (error) {
+    console.error('❌ ChatSupport: Setup error:', error);
+  }
+};
 
   const loadSystemInfo = async () => {
     try {
@@ -127,7 +158,7 @@ export default function ChatSupportScreen({ navigation }: any) {
             const formattedMessages = messagesResponse.data.messages.map((msg: any) => ({
               id: msg.id,
               text: msg.text || msg.content,
-              sender: msg.senderId === "support" || msg.senderRole === "support" ? "support" : "user",
+              sender: (msg.senderRole === "support" || msg.senderRole === "admin" || String(msg.senderRole).includes('admin')) ? "support" : "user",
               timestamp: formatTime(msg.createdAt || msg.timestamp),
               isRead: msg.isRead || false,
               createdAt: msg.createdAt,

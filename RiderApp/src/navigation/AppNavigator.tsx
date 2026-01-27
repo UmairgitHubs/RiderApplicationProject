@@ -45,6 +45,8 @@ import RiderEarningsScreen from "../screens/rider/RiderEarningsScreen";
 import RiderOrderHistoryScreen from "../screens/rider/RiderOrderHistoryScreen";
 import RiderProfileScreen from "../screens/rider/RiderProfileScreen";
 import PerformanceStatsScreen from "../screens/rider/PerformanceStatsScreen";
+import VehicleInformationScreen from "../screens/rider/VehicleInformationScreen";
+import WorkingAreasScreen from "../screens/rider/WorkingAreasScreen";
 
 import RoutePlanningScreen from "../screens/rider/RoutePlanningScreen";
 import AboutScreen from "../screens/common/AboutScreen";
@@ -132,6 +134,8 @@ export type RootStackParamList = {
   FAQ: undefined;
   FranchiseOrderDetails: { shipment?: any } | undefined;
   FranchiseTracking: { shipmentId: string; trackingNumber?: string } | undefined;
+  VehicleInformation: undefined;
+  WorkingAreas: undefined;
 };
 
 const Stack = createStackNavigator<RootStackParamList>();
@@ -314,6 +318,8 @@ export default function AppNavigator() {
         <Stack.Screen name="FAQ" component={FAQScreen} />
         <Stack.Screen name="FranchiseOrderDetails" component={FranchiseOrderDetailsScreen} />
         <Stack.Screen name="FranchiseTracking" component={FranchiseTrackingScreen} />
+        <Stack.Screen name="VehicleInformation" component={VehicleInformationScreen} />
+        <Stack.Screen name="WorkingAreas" component={WorkingAreasScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

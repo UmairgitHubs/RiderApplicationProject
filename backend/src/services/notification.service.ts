@@ -107,12 +107,18 @@ export class NotificationService {
 
       // Send push notification if enabled
       if (user.push_notifications && user.fcm_token) {
+        console.log(`📲 Sending Push to ${payload.userId}`);
         await this.sendPushNotification(user.fcm_token, payload);
+      } else {
+        console.log(`ℹ️ Skipping Push for ${payload.userId}: Enabled=${user.push_notifications}, Token=${!!user.fcm_token}`);
       }
 
       // Send email notification if enabled
       if (user.email_notifications && user.email) {
+        console.log(`📧 Sending Email to ${payload.userId} (${user.email})`);
         await this.sendEmailNotification(user.email, payload);
+      } else {
+        console.log(`ℹ️ Skipping Email for ${payload.userId}: Enabled=${user.email_notifications}, Email=${!!user.email}`);
       }
 
       // Send SMS notification if enabled
@@ -123,7 +129,8 @@ export class NotificationService {
       // Store notification in database
       await this.storeNotification(payload);
       
-      logger.info(`Notification sent to user ${payload.userId}: ${payload.title}`);
+      logger.info(`Notification stored for user ${payload.userId}`);
+
     } catch (error) {
       logger.error('Error sending notification:', error);
     }
@@ -133,20 +140,33 @@ export class NotificationService {
    * Check if user wants this type of notification
    */
   private static checkUserPreference(user: any, type: NotificationType): boolean {
+    // Check global channel preferences first ??? 
+    // Actually, channel prefs (email/sms) are checked at sending time.
+    // This method checks the "Topic" preference (Order vs Promotion).
+
+    let pref = true;
     switch (type) {
       case NotificationType.ORDER_UPDATE:
-        return user.notif_order_updates ?? true;
+        pref = user.notif_order_updates ?? true;
+        break;
       case NotificationType.DELIVERY_ALERT:
-        return user.notif_delivery_alerts ?? true;
+        pref = user.notif_delivery_alerts ?? true;
+        break;
       case NotificationType.PAYMENT:
-        return user.notif_payments ?? true;
+        pref = user.notif_payments ?? true;
+        break;
       case NotificationType.PROMOTION:
-        return user.notif_promotions ?? false;
+        pref = user.notif_promotions ?? false;
+        break;
       case NotificationType.SYSTEM_UPDATE:
-        return user.notif_system_updates ?? false;
-      default:
-        return true;
+        pref = user.notif_system_updates ?? false;
+        break;
     }
+
+    if (!pref) {
+      logger.info(`User disabled topic: ${type}`);
+    }
+    return pref;
   }
 
   /**
@@ -158,7 +178,8 @@ export class NotificationService {
   ): Promise<void> {
     try {
       if (!isInitialized) {
-        logger.warn('Firebase not initialized - skipping push notification');
+        // Only log at debug level to avoid spamming if not configured
+        logger.debug('Firebase not initialized - skipping push');
         return;
       }
 
@@ -174,25 +195,17 @@ export class NotificationService {
         },
         android: {
           priority: 'high',
-          notification: {
-            sound: 'default',
-            channelId: 'default',
-          },
+          notification: { sound: 'default', channelId: 'default' },
         },
         apns: {
-          payload: {
-            aps: {
-              sound: 'default',
-              badge: 1,
-            },
-          },
+          payload: { aps: { sound: 'default', badge: 1 } },
         },
       };
 
       await firebaseAdmin.messaging().send(message);
-      logger.info(`Push notification sent to ${fcmToken}`);
+      logger.info(`Push sent to ${fcmToken.substring(0, 10)}...`);
     } catch (error) {
-      logger.error('Error sending push notification:', error);
+      logger.error('Push notification error:', error);
     }
   }
 
@@ -204,22 +217,26 @@ export class NotificationService {
     payload: NotificationPayload
   ): Promise<void> {
     try {
-      if (!config.email.user) {
-        logger.warn('Email not configured - skipping email notification');
+      if (!config.email.user || !config.email.password) {
+        logger.warn(`📧 Email credentials missing. Configured User: ${!!config.email.user}, Configured Pass: ${!!config.email.password}. Skipping email to ${email}.`);
         return;
       }
 
       const mailOptions = {
-        from: `"COD Express" <${config.email.from}>`,
+        from: `"${config.email.from}" <${config.email.user}>`, 
         to: email,
         subject: payload.title,
         html: this.getEmailTemplate(payload),
       };
 
-      await emailTransporter.sendMail(mailOptions);
-      logger.info(`Email notification sent to ${email}`);
-    } catch (error) {
-      logger.error('Error sending email notification:', error);
+      console.log(`📧 Attempting to send email to ${email} via ${config.email.host}:${config.email.port}`);
+      const info = await emailTransporter.sendMail(mailOptions);
+      logger.info(`✅ Email sent to ${email}. ID: ${info.messageId}`);
+    } catch (error: any) {
+      logger.error('❌ Email send failed:', error.message);
+      if (error.code === 'EAUTH') {
+        logger.error('Authentication invalid. Check EMAIL_USER and EMAIL_PASSWORD (use App Password for Gmail).');
+      }
     }
   }
 
@@ -232,27 +249,26 @@ export class NotificationService {
   ): Promise<void> {
     try {
       if (!twilioClient) {
-        // Only log warning once per startup ideally, but fine here for now
+        logger.warn('Twilio client not initialized (missing SID/Token). Skipping SMS.');
         return;
       }
 
       if (!process.env.TWILIO_PHONE_NUMBER) {
-        logger.warn('Twilio phone number not configured - skipping SMS');
+        logger.warn('TWILIO_PHONE_NUMBER missing. Skipping SMS.');
         return;
       }
 
-      // Keep SMS short
       const body = `${payload.title}: ${payload.body}`;
       
-      await twilioClient.messages.create({
-        body: body.substring(0, 160), // Basic truncation
+      const msg = await twilioClient.messages.create({
+        body: body.substring(0, 160),
         from: process.env.TWILIO_PHONE_NUMBER,
         to: phone,
       });
 
-      logger.info(`SMS sent to ${phone}`);
-    } catch (error) {
-      logger.error('Error sending SMS notification:', error);
+      logger.info(`SMS sent to ${phone}. SID: ${msg.sid}`);
+    } catch (error: any) {
+      logger.error('SMS send failed:', error.message);
     }
   }
 

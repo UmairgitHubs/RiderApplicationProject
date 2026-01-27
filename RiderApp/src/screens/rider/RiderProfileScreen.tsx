@@ -12,11 +12,16 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useWindowDimensions } from 'react-native';
 import { colors, typography, spacing, borderRadius } from '../../theme';
 import { profileApi, riderApi, authApi } from '../../services/api';
 
 export default function RiderProfileScreen() {
   const navigation = useNavigation<any>();
+  const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const isTablet = width > 768;
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<any>(null);
   const [performance, setPerformance] = useState({
@@ -34,43 +39,43 @@ export default function RiderProfileScreen() {
       const profileData = (profileResponse as any)?.data?.profile || {};
       setProfile(profileData);
 
-      // Fetch earnings for performance stats
+      // Fetch monthly performance stats
       const today = new Date();
       const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-      const earningsResponse = await riderApi.getEarnings({
+      
+      const statsResponse = await riderApi.getPerformanceStats({
         startDate: firstDayOfMonth.toISOString(),
         endDate: today.toISOString(),
       });
 
-      // Calculate performance metrics
-      const totalDeliveries = profileData.totalDeliveries || 0;
-      const rating = parseFloat(profileData.rating || 0);
-      // On-time rate would need to be calculated from delivery history
-      // For now, using a default or calculated value
-      const onTimeRate = 98; // This should come from backend stats
-
-      setPerformance({
-        deliveries: totalDeliveries,
-        onTimeRate,
-        rating,
-      });
+      if (statsResponse.data) {
+        setPerformance(statsResponse.data);
+      } else {
+        // Fallback default
+        setPerformance({
+          deliveries: 0,
+          onTimeRate: 100,
+          rating: 5.0,
+        });
+      }
     } catch (error: any) {
       console.error('Error fetching profile data:', error);
       // Use default data if API fails
       setProfile({
-        fullName: 'Mike Johnson',
-        email: 'mike.johnson@codexpress.com',
-        phone: '+1 (555) 987-6543',
-        vehicleType: 'Honda CBR 250R',
-        vehicleNumber: 'ABC-123',
-        rating: 4.9,
-        totalDeliveries: 156,
+        fullName: 'Rider Profile',
+        email: 'rider@codexpress.com',
+        phone: 'N/A',
+        vehicleType: 'Bike',
+        vehicleNumber: 'N/A',
+        rating: 5.0,
+        totalDeliveries: 0,
       });
       setPerformance({
-        deliveries: 156,
-        onTimeRate: 98,
-        rating: 4.9,
+        deliveries: 0,
+        onTimeRate: 100,
+        rating: 5.0,
       });
+
     } finally {
       setLoading(false);
     }
@@ -170,16 +175,10 @@ export default function RiderProfileScreen() {
         parent.navigate('Notifications');
         break;
       case 'VehicleInformation':
-        parent.navigate('ComingSoon', {
-          featureName: 'Vehicle Information',
-          description: 'Manage your vehicle details and documents.',
-        });
+        parent.navigate('VehicleInformation');
         break;
       case 'WorkingAreas':
-        parent.navigate('ComingSoon', {
-          featureName: 'Working Areas',
-          description: 'Set your preferred delivery areas.',
-        });
+        parent.navigate('WorkingAreas');
         break;
       case 'PrivacySecurity':
         parent.navigate('PrivacySecurity');
@@ -213,10 +212,10 @@ export default function RiderProfileScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Green Header */}
+      {/* Green Header - Responsive */}
       <LinearGradient
         colors={['#4CAF50', '#66BB6A']}
-        style={styles.header}
+        style={[styles.header, { paddingTop: insets.top + (Platform.OS === 'ios' ? 10 : 20) }]}
       >
         <Text style={styles.headerTitle}>Account</Text>
         <Text style={styles.headerSubtitle}>Manage your profile & settings</Text>
@@ -224,7 +223,10 @@ export default function RiderProfileScreen() {
 
       <ScrollView
         style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[
+          styles.scrollContent,
+          isTablet && styles.scrollContentTablet
+        ]}
         showsVerticalScrollIndicator={false}
       >
         {/* Profile Card */}
@@ -289,18 +291,41 @@ export default function RiderProfileScreen() {
         <View style={styles.performanceCard}>
           <Text style={styles.performanceTitle}>This Month's Performance</Text>
           <View style={styles.performanceStats}>
-            <View style={styles.performanceStatBox}>
-              <Text style={styles.performanceStatValue}>{performance.deliveries}</Text>
-              <Text style={styles.performanceStatLabel}>Deliveries</Text>
-            </View>
-            <View style={styles.performanceStatBox}>
-              <Text style={styles.performanceStatValue}>{performance.onTimeRate}%</Text>
-              <Text style={styles.performanceStatLabel}>On-Time</Text>
-            </View>
-            <View style={styles.performanceStatBox}>
-              <Text style={styles.performanceStatValue}>{performance.rating.toFixed(1)}</Text>
-              <Text style={styles.performanceStatLabel}>Rating</Text>
-            </View>
+            {/* Deliveries */}
+            <LinearGradient
+              colors={['#2196F3', '#42A5F5']}
+              style={styles.performanceStatBox}
+            >
+              <View style={styles.statIconContainer}>
+                <Ionicons name="cube-outline" size={24} color="#FFF" />
+              </View>
+              <Text style={styles.performanceStatValueLight}>{performance.deliveries}</Text>
+              <Text style={styles.performanceStatLabelLight}>Deliveries</Text>
+            </LinearGradient>
+
+            {/* On-Time */}
+            <LinearGradient
+              colors={['#4CAF50', '#66BB6A']}
+              style={styles.performanceStatBox}
+            >
+              <View style={styles.statIconContainer}>
+                <Ionicons name="time-outline" size={24} color="#FFF" />
+              </View>
+              <Text style={styles.performanceStatValueLight}>{performance.onTimeRate}%</Text>
+              <Text style={styles.performanceStatLabelLight}>On-Time</Text>
+            </LinearGradient>
+
+            {/* Rating */}
+            <LinearGradient
+              colors={['#FF9800', '#FFB74D']}
+              style={styles.performanceStatBox}
+            >
+              <View style={styles.statIconContainer}>
+                <Ionicons name="star-outline" size={24} color="#FFF" />
+              </View>
+              <Text style={styles.performanceStatValueLight}>{performance.rating.toFixed(1)}</Text>
+              <Text style={styles.performanceStatLabelLight}>Rating</Text>
+            </LinearGradient>
           </View>
         </View>
 
@@ -357,10 +382,10 @@ const styles = StyleSheet.create({
     backgroundColor: colors.backgroundLight,
   },
   header: {
-    paddingTop: Platform.OS === 'ios' ? 50 : 30,
     paddingBottom: spacing.xl,
     paddingHorizontal: spacing.lg,
     alignItems: 'center',
+    paddingTop: Platform.OS === 'ios' ? 50 : 30, // Default fallback
   },
   headerTitle: {
     fontSize: typography.fontSize['2xl'],
@@ -379,6 +404,11 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: spacing.lg,
     paddingBottom: spacing.xl,
+  },
+  scrollContentTablet: {
+    width: '100%',
+    maxWidth: 600,
+    alignSelf: 'center',
   },
   profileCard: {
     backgroundColor: colors.background,
@@ -479,10 +509,21 @@ const styles = StyleSheet.create({
   },
   performanceStatBox: {
     flex: 1,
-    backgroundColor: colors.backgroundLight,
-    borderRadius: borderRadius.md,
+    borderRadius: borderRadius.lg,
     padding: spacing.md,
     alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+  },
+  statIconContainer: {
+    marginBottom: spacing.xs,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    padding: 8,
+    borderRadius: 20,
   },
   performanceStatValue: {
     fontSize: typography.fontSize['2xl'],
@@ -490,9 +531,20 @@ const styles = StyleSheet.create({
     color: '#4CAF50',
     marginBottom: spacing.xs,
   },
+  performanceStatValueLight: {
+    fontSize: typography.fontSize.xl,
+    fontWeight: typography.fontWeight.bold,
+    color: '#FFF',
+    marginBottom: 2,
+  },
   performanceStatLabel: {
     fontSize: typography.fontSize.sm,
     color: colors.textLight,
+  },
+  performanceStatLabelLight: {
+    fontSize: typography.fontSize.xs,
+    color: 'rgba(255,255,255,0.9)',
+    fontWeight: typography.fontWeight.medium,
   },
   menuItem: {
     flexDirection: 'row',

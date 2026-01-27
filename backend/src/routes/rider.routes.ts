@@ -10,6 +10,7 @@ import {
   getEarnings,
   getCompletedOrders,
   getRiderRoutes,
+  getPerformanceStats,
 } from '../controllers/rider.controller';
 import { authenticate } from '../middleware/auth.middleware';
 
@@ -28,6 +29,7 @@ router.post('/complete-delivery', completeDelivery);
 router.post('/toggle-online', toggleOnlineStatus);
 router.get('/earnings', getEarnings);
 router.get('/routes', getRiderRoutes);
+router.get('/performance-stats', getPerformanceStats);
 
 export default router;
 

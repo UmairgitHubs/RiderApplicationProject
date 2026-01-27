@@ -129,7 +129,11 @@ model Rider {
   cnic              String?         @unique
   license_number    String?
   vehicle_type      String?
+  vehicle_model     String?
+  vehicle_color     String?
   vehicle_number    String?
+  emergency_contact_name String?
+  emergency_contact_phone String?
   is_online         Boolean         @default(false)
   current_latitude  Decimal?        @db.Decimal(10, 8)
   current_longitude Decimal?        @db.Decimal(11, 8)

@@ -11,9 +11,14 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { colors, typography, spacing, borderRadius } from "../../theme";
 import { useNavigation, CommonActions } from "@react-navigation/native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useWindowDimensions } from "react-native";
 
 export default function HelpCenterScreen() {
   const navigation = useNavigation<any>();
+  const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const isTablet = width > 768;
 
   const quickActions = [
     {
@@ -82,23 +87,33 @@ export default function HelpCenterScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Orange Rounded Header */}
-      <View style={styles.orangeHeader}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Ionicons name="arrow-back" size={24} color={colors.textWhite} />
-        </TouchableOpacity>
+      {/* Orange Rounded Header - Responsive */}
+      <View style={[
+        styles.orangeHeader, 
+        { 
+          paddingTop: insets.top,
+          height: insets.top + 70, // Dynamic height based on safe area
+        }
+      ]}>
+        <View style={styles.headerContent}> 
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Ionicons name="arrow-back" size={24} color={colors.textWhite} />
+          </TouchableOpacity>
 
-        <View style={styles.headerTitleContainer}>
           <Text style={styles.headerTitle}>Help & Support</Text>
         </View>
       </View>
 
       <ScrollView
         style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[
+          styles.scrollContent,
+          isTablet && styles.scrollContentTablet
+        ]}
         showsVerticalScrollIndicator={false}
       >
         {/* Quick Actions Section */}
@@ -214,27 +229,28 @@ const styles = StyleSheet.create({
   },
   orangeHeader: {
     backgroundColor: colors.primary,
-    paddingTop: Platform.OS === "ios" ? 50 : 30,
-    paddingBottom: 20,
     paddingHorizontal: spacing.lg,
     borderBottomLeftRadius: 20,
     borderBottomRightRadius: 20,
+    justifyContent: "center",
+    width: '100%',
+    zIndex: 10,
+  },
+  headerContent: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    minHeight: 100,
-    position: "relative",
+    height: 60, // Fixed height for content portion
+    position: 'relative',
+    width: '100%',
   },
   backButton: {
     position: "absolute",
-    left: spacing.lg,
-    top: Platform.OS === "ios" ? 50 : 30,
-    zIndex: 1,
-  },
-  headerTitleContainer: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
+    left: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    height: '100%',
+    zIndex: 20,
   },
   headerTitle: {
     fontSize: typography.fontSize["2xl"],
@@ -244,10 +260,16 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
+    width: '100%',
   },
   scrollContent: {
     padding: spacing.lg,
     paddingBottom: spacing.xl,
+  },
+  scrollContentTablet: {
+    width: '100%',
+    maxWidth: 600,
+    alignSelf: 'center',
   },
   card: {
     backgroundColor: colors.background,

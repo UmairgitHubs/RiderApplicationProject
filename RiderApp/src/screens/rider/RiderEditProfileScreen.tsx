@@ -9,6 +9,7 @@ import {
   Platform,
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -38,7 +39,7 @@ export default function RiderEditProfileScreen() {
   const fetchProfile = async () => {
     try {
       setLoading(true);
-      const response = await profileApi.getProfile();
+      const response = await profileApi.getProfile() as any;
       if (response.success && response.data?.profile) {
         const profile = response.data.profile;
         setFullName(profile.fullName || '');
@@ -66,7 +67,7 @@ export default function RiderEditProfileScreen() {
         // Emergency contact would need to be added to backend API
         emergencyContactName,
         emergencyContactPhone,
-      });
+      }) as any;
       
       if (response.success) {
         Alert.alert('Success', 'Profile updated successfully', [
@@ -106,143 +107,149 @@ export default function RiderEditProfileScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Green Header */}
-      <LinearGradient
-        colors={['#4CAF50', '#66BB6A']}
-        style={styles.header}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => {
-            const parent = navigation.getParent();
-            if (parent && parent.canGoBack()) {
-              parent.goBack();
-            } else if (navigation.canGoBack()) {
-              navigation.goBack();
-            }
-          }}
+        {/* Green Header */}
+        <LinearGradient
+          colors={['#4CAF50', '#66BB6A']}
+          style={[styles.header, { paddingTop: insets.top + spacing.sm }]}
         >
-          <Ionicons name="arrow-back" size={24} color={colors.textWhite} />
-        </TouchableOpacity>
-        
-        <View style={styles.headerTextContainer}>
-          <Text style={styles.headerTitle}>Edit Profile</Text>
-        </View>
-      </LinearGradient>
+          <TouchableOpacity 
+            style={styles.backButton}
+            onPress={() => {
+              const parent = navigation.getParent();
+              if (parent && parent.canGoBack()) {
+                parent.goBack();
+              } else if (navigation.canGoBack()) {
+                navigation.goBack();
+              }
+            }}
+          >
+            <Ionicons name="arrow-back" size={24} color={colors.textWhite} />
+          </TouchableOpacity>
+          
+          <View style={styles.headerTextContainer}>
+            <Text style={styles.headerTitle}>Edit Profile</Text>
+          </View>
+        </LinearGradient>
 
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Profile Picture Section */}
-        <View style={styles.photoSection}>
-          <View style={styles.avatarContainer}>
-            <LinearGradient
-              colors={['#4CAF50', '#66BB6A']}
-              style={styles.avatar}
-            >
-              <Text style={styles.avatarText}>{getInitials(fullName)}</Text>
-            </LinearGradient>
-            <TouchableOpacity 
-              style={styles.cameraButton}
-              onPress={handleChangePhoto}
-            >
-              <Ionicons name="camera" size={16} color={colors.text} />
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* Profile Picture Section */}
+          <View style={styles.photoSection}>
+            <View style={styles.avatarContainer}>
+              <LinearGradient
+                colors={['#4CAF50', '#66BB6A']}
+                style={styles.avatar}
+              >
+                <Text style={styles.avatarText}>{getInitials(fullName)}</Text>
+              </LinearGradient>
+              <TouchableOpacity 
+                style={styles.cameraButton}
+                onPress={handleChangePhoto}
+              >
+                <Ionicons name="camera" size={16} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity onPress={handleChangePhoto}>
+              <Text style={styles.changePhotoText}>Change Photo</Text>
             </TouchableOpacity>
           </View>
-          <TouchableOpacity onPress={handleChangePhoto}>
-            <Text style={styles.changePhotoText}>Change Photo</Text>
+
+          {/* Personal Information Section */}
+          <Text style={styles.sectionTitle}>PERSONAL INFORMATION</Text>
+          
+          <View style={styles.inputContainer}>
+            <Ionicons name="person-outline" size={20} color={colors.textLight} style={styles.inputIcon} />
+            <TextInput
+              style={styles.input}
+              placeholder="Full Name"
+              placeholderTextColor={colors.textLight}
+              value={fullName}
+              onChangeText={setFullName}
+            />
+          </View>
+
+          <View style={styles.inputContainer}>
+            <Ionicons name="mail-outline" size={20} color={colors.textLight} style={styles.inputIcon} />
+            <TextInput
+              style={styles.input}
+              placeholder="Email"
+              placeholderTextColor={colors.textLight}
+              value={email}
+              onChangeText={setEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              editable={false}
+            />
+          </View>
+
+          <View style={styles.inputContainer}>
+            <Ionicons name="call-outline" size={20} color={colors.textLight} style={styles.inputIcon} />
+            <TextInput
+              style={styles.input}
+              placeholder="Phone Number"
+              placeholderTextColor={colors.textLight}
+              value={phone}
+              onChangeText={setPhone}
+              keyboardType="phone-pad"
+            />
+          </View>
+
+          {/* Emergency Contact Section */}
+          <Text style={styles.sectionTitle}>EMERGENCY CONTACT</Text>
+          
+          <View style={styles.inputContainer}>
+            <Ionicons name="person-outline" size={20} color={colors.textLight} style={styles.inputIcon} />
+            <TextInput
+              style={styles.input}
+              placeholder="Contact Name"
+              placeholderTextColor={colors.textLight}
+              value={emergencyContactName}
+              onChangeText={setEmergencyContactName}
+            />
+          </View>
+
+          <View style={styles.inputContainer}>
+            <Ionicons name="call-outline" size={20} color={colors.textLight} style={styles.inputIcon} />
+            <TextInput
+              style={styles.input}
+              placeholder="Contact Phone"
+              placeholderTextColor={colors.textLight}
+              value={emergencyContactPhone}
+              onChangeText={setEmergencyContactPhone}
+              keyboardType="phone-pad"
+            />
+          </View>
+
+        </ScrollView>
+
+        {/* Save Changes Button Footer */}
+        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 20) }]}>
+          <TouchableOpacity 
+            style={[styles.saveButton, saving && styles.saveButtonDisabled]} 
+            onPress={handleSaveProfile}
+            disabled={saving}
+          >
+            {saving ? (
+              <ActivityIndicator size="small" color={colors.textWhite} />
+            ) : (
+              <LinearGradient
+                colors={['#4CAF50', '#66BB6A']}
+                style={styles.saveButtonGradient}
+              >
+                <Text style={styles.saveButtonText}>Save Changes</Text>
+              </LinearGradient>
+            )}
           </TouchableOpacity>
         </View>
-
-        {/* Personal Information Section */}
-        <Text style={styles.sectionTitle}>PERSONAL INFORMATION</Text>
-        
-        <View style={styles.inputContainer}>
-          <Ionicons name="person-outline" size={20} color={colors.textLight} style={styles.inputIcon} />
-          <TextInput
-            style={styles.input}
-            placeholder="Full Name"
-            placeholderTextColor={colors.textLight}
-            value={fullName}
-            onChangeText={setFullName}
-          />
-        </View>
-
-        <View style={styles.inputContainer}>
-          <Ionicons name="mail-outline" size={20} color={colors.textLight} style={styles.inputIcon} />
-          <TextInput
-            style={styles.input}
-            placeholder="Email"
-            placeholderTextColor={colors.textLight}
-            value={email}
-            onChangeText={setEmail}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            editable={false}
-          />
-        </View>
-
-        <View style={styles.inputContainer}>
-          <Ionicons name="call-outline" size={20} color={colors.textLight} style={styles.inputIcon} />
-          <TextInput
-            style={styles.input}
-            placeholder="Phone Number"
-            placeholderTextColor={colors.textLight}
-            value={phone}
-            onChangeText={setPhone}
-            keyboardType="phone-pad"
-          />
-        </View>
-
-        {/* Emergency Contact Section */}
-        <Text style={styles.sectionTitle}>EMERGENCY CONTACT</Text>
-        
-        <View style={styles.inputContainer}>
-          <Ionicons name="person-outline" size={20} color={colors.textLight} style={styles.inputIcon} />
-          <TextInput
-            style={styles.input}
-            placeholder="Contact Name"
-            placeholderTextColor={colors.textLight}
-            value={emergencyContactName}
-            onChangeText={setEmergencyContactName}
-          />
-        </View>
-
-        <View style={styles.inputContainer}>
-          <Ionicons name="call-outline" size={20} color={colors.textLight} style={styles.inputIcon} />
-          <TextInput
-            style={styles.input}
-            placeholder="Contact Phone"
-            placeholderTextColor={colors.textLight}
-            value={emergencyContactPhone}
-            onChangeText={setEmergencyContactPhone}
-            keyboardType="phone-pad"
-          />
-        </View>
-
-      </ScrollView>
-
-      {/* Save Changes Button Footer */}
-      <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 20) }]}>
-        <TouchableOpacity 
-          style={[styles.saveButton, saving && styles.saveButtonDisabled]} 
-          onPress={handleSaveProfile}
-          disabled={saving}
-        >
-          {saving ? (
-            <ActivityIndicator size="small" color={colors.textWhite} />
-          ) : (
-            <LinearGradient
-              colors={['#4CAF50', '#66BB6A']}
-              style={styles.saveButtonGradient}
-            >
-              <Text style={styles.saveButtonText}>Save Changes</Text>
-            </LinearGradient>
-          )}
-        </TouchableOpacity>
-      </View>
+      </KeyboardAvoidingView>
     </View>
   );
 }
@@ -257,7 +264,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   header: {
-    paddingTop: Platform.OS === 'ios' ? 50 : 30,
     paddingBottom: spacing.xl,
     paddingHorizontal: spacing.lg,
   },

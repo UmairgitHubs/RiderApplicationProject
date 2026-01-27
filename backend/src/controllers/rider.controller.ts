@@ -229,12 +229,13 @@ export const pickupOrder = async (req: Request, res: Response) => {
       });
     }
 
-    if (shipment.status !== 'assigned') {
+    // Allow 'pending' status if assigned via route (fallback for legacy data issues)
+    if (shipment.status !== 'assigned' && !(shipment.status === 'pending' && isAssignedViaRoute)) {
       return res.status(400).json({
         success: false,
         error: {
           code: 'INVALID_STATUS',
-          message: 'Shipment status must be assigned to pick up.',
+          message: `Shipment status (${shipment.status}) is invalid for pickup. Must be assigned.`,
         },
       });
     }
@@ -396,6 +397,8 @@ export const getActiveOrders = async (req: Request, res: Response) => {
           specialInstructions: s.special_instructions,
           deliveryLatitude: s.delivery_latitude,
           deliveryLongitude: s.delivery_longitude,
+          pickupLatitude: s.pickup_latitude,
+          pickupLongitude: s.pickup_longitude,
         })),
       },
     });
@@ -799,17 +802,13 @@ export const getRiderRoutes = async (req: Request, res: Response) => {
               select: {
                 id: true,
                 tracking_number: true,
+                status: true,
+                pickup_address: true,
+                delivery_address: true,
                 recipient_name: true,
                 recipient_phone: true,
-                delivery_address: true,
-                delivery_latitude: true,
-                delivery_longitude: true,
-                status: true,
-                package_type: true,
-                scheduled_delivery_time: true,
-                estimated_delivery_time: true,
-                cod_amount: true,
-                distance_km: true,
+                package_weight: true,
+                estimated_delivery_time: true
               }
             }
           }
@@ -825,28 +824,21 @@ export const getRiderRoutes = async (req: Request, res: Response) => {
           id: route.id,
           name: route.name,
           status: route.status,
-          distance: route.distance_km,
-          duration: route.duration_min,
+          startTime: route.start_time,
+          endTime: route.end_time,
+          distanceKm: route.distance_km,
+          durationMin: route.duration_min,
           hub: route.hub,
           stops: route.stops.map(stop => ({
             id: stop.id,
-            stopOrder: stop.stop_order,
             type: stop.type,
             status: stop.status,
+            order: stop.stop_order,
             location: stop.location,
             latitude: stop.latitude,
             longitude: stop.longitude,
-            shipment: stop.shipment ? {
-              id: stop.shipment.id,
-              trackingNumber: stop.shipment.tracking_number,
-              recipientName: stop.shipment.recipient_name,
-              address: stop.shipment.delivery_address,
-              latitude: stop.shipment.delivery_latitude,
-              longitude: stop.shipment.delivery_longitude,
-              scheduledDeliveryTime: stop.shipment.scheduled_delivery_time,
-              codAmount: stop.shipment.cod_amount,
-              distanceKm: stop.shipment.distance_km,
-            } : null
+            shipment: stop.shipment,
+            arrivalTime: stop.arrival_time
           }))
         }))
       }
@@ -864,3 +856,76 @@ export const getRiderRoutes = async (req: Request, res: Response) => {
   }
 };
 
+// Get rider performance stats
+export const getPerformanceStats = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.id;
+    const { startDate, endDate } = req.query;
+
+    const rider = await prisma.rider.findUnique({
+      where: { id: userId },
+      select: { rating: true, total_deliveries: true }
+    });
+
+    if (!rider) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'Rider not found' }
+      });
+    }
+
+    const where: any = {
+      rider_id: userId,
+      status: 'delivered',
+    };
+
+    if (startDate || endDate) {
+        where.actual_delivery_time = {};
+        if (startDate) where.actual_delivery_time.gte = new Date(startDate as string);
+        if (endDate) where.actual_delivery_time.lte = new Date(endDate as string);
+    }
+
+    const shipments = await prisma.shipment.findMany({
+      where,
+      select: {
+          actual_delivery_time: true,
+          scheduled_delivery_time: true,
+      }
+    });
+
+    const deliveriesCount = shipments.length;
+    
+    // Calculate on-time
+    let onTimeCount = 0;
+    shipments.forEach(s => {
+        if (s.scheduled_delivery_time && s.actual_delivery_time) {
+            // Give 30 mins buffer?
+            // Let's stick to strict <= for now
+            if (s.actual_delivery_time <= s.scheduled_delivery_time) {
+                onTimeCount++;
+            }
+        } else {
+             // If no scheduled time, count as on-time (cannot be late if no deadline)
+            onTimeCount++; 
+        }
+    });
+
+    const onTimeRate = deliveriesCount > 0 ? (onTimeCount / deliveriesCount) * 100 : 100;
+
+    res.json({
+      success: true,
+      data: {
+        deliveries: deliveriesCount,
+        onTimeRate: parseFloat(onTimeRate.toFixed(1)),
+        rating: Number(rider.rating || 0), 
+      }
+    });
+
+  } catch (error: any) {
+    logger.error('Get performance stats error:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: 'Error fetching stats' }
+    });
+  }
+};

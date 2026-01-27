@@ -234,11 +234,15 @@ export default function RoutePlanningScreen() {
                   <Text style={styles.badgeText}>URGENT</Text>
                 </View>
               )}
-              <View style={[styles.badge, styles.statusBadge]}>
-                <Text style={styles.badgeText}>
-                  {currentStop.status === 'active' ? 'ACTIVE' : 'PENDING'}
-                </Text>
-              </View>
+              {currentStop.taskType === 'pickup' ? (
+                <View style={[styles.badge, { backgroundColor: '#FF8C00' }]}>
+                    <Text style={styles.badgeText}>PICKUP</Text>
+                </View>
+              ) : (
+                <View style={[styles.badge, { backgroundColor: '#4CAF50' }]}>
+                    <Text style={styles.badgeText}>DELIVERY</Text>
+                </View>
+              )}
             </View>
 
             <Text style={styles.trackingId}>{currentStop.trackingId}</Text>
@@ -246,7 +250,9 @@ export default function RoutePlanningScreen() {
             <View style={styles.addressSection}>
               <Ionicons name="location-outline" size={16} color={colors.textLight} />
               <View style={styles.addressContent}>
-                <Text style={styles.addressLabel}>Delivery Address</Text>
+                <Text style={styles.addressLabel}>
+                    {currentStop.taskType === 'pickup' ? 'Pickup Address' : 'Delivery Address'}
+                </Text>
                 <Text style={styles.addressText}>{currentStop.address}</Text>
               </View>
             </View>
@@ -303,6 +309,11 @@ export default function RoutePlanningScreen() {
                   <View style={styles.stopItemContent}>
                     <View style={styles.stopItemHeader}>
                       <Text style={styles.stopNumber}>Stop #{stop.stopNumber}</Text>
+                      {stop.taskType === 'pickup' && (
+                        <View style={[styles.badge, { backgroundColor: '#FF8C00' }]}>
+                           <Text style={styles.badgeTextSmall}>PICKUP</Text>
+                        </View>
+                      )}
                       {stop.status === 'active' && (
                         <View style={[styles.badge, styles.activeBadge]}>
                           <Text style={styles.badgeTextSmall}>Active</Text>
@@ -337,28 +348,28 @@ export default function RoutePlanningScreen() {
         <View style={styles.statsCard}>
           <Text style={styles.statsTitle}>Route Statistics</Text>
           
-          <View style={styles.statRow}>
+          <View style={[styles.statRow, styles.statRowCompleted]}>
             <View style={styles.statItem}>
-              <Ionicons name="checkmark-circle" size={20} color={colors.success} />
-              <Text style={styles.routeStatLabel}>Completed Stops</Text>
+              <Ionicons name="checkmark-circle-outline" size={22} color="#16A34A" />
+              <Text style={styles.statLabel}>Completed Stops</Text>
             </View>
-            <Text style={styles.statValue}>{routeStats.completedStops}</Text>
+            <Text style={[styles.statValue, { color: '#16A34A' }]}>{routeStats.completedStops}</Text>
           </View>
 
-          <View style={styles.statRow}>
+          <View style={[styles.statRow, styles.statRowRemaining]}>
             <View style={styles.statItem}>
-              <Ionicons name="cube-outline" size={20} color={colors.primary} />
-              <Text style={styles.routeStatLabel}>Remaining Stops</Text>
+              <Ionicons name="cube-outline" size={22} color="#2563EB" />
+              <Text style={styles.statLabel}>Remaining Stops</Text>
             </View>
-            <Text style={styles.statValue}>{routeStats.remainingStops}</Text>
+            <Text style={[styles.statValue, { color: '#2563EB' }]}>{routeStats.remainingStops}</Text>
           </View>
 
-          <View style={styles.statRow}>
+          <View style={[styles.statRow, styles.statRowEfficiency]}>
             <View style={styles.statItem}>
-              <Ionicons name="stats-chart-outline" size={20} color="#9C27B0" />
-              <Text style={styles.routeStatLabel}>Route Efficiency</Text>
+              <Ionicons name="trending-up-outline" size={22} color="#9333EA" />
+              <Text style={styles.statLabel}>Route Efficiency</Text>
             </View>
-            <Text style={[styles.statValue, { color: '#9C27B0' }]}>Optimized</Text>
+            <Text style={[styles.statValue, { color: '#9333EA', fontSize: 16, fontWeight: '600' }]}>Optimized</Text>
           </View>
         </View>
 
@@ -828,16 +839,32 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: spacing.md,
+    padding: spacing.md,
+    borderRadius: borderRadius.md,
+  },
+  statRowCompleted: {
+    backgroundColor: '#DCFCE7', // Light green
+  },
+  statRowRemaining: {
+    backgroundColor: '#DBEAFE', // Light blue
+  },
+  statRowEfficiency: {
+    backgroundColor: '#F3E8FF', // Light purple
+    marginBottom: 0,
   },
   statItem: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
   },
+  statLabel: {
+    fontSize: typography.fontSize.sm,
+    color: colors.text,
+    fontWeight: '500',
+  },
   statValue: {
     fontSize: typography.fontSize.lg,
     fontWeight: typography.fontWeight.bold,
-    color: colors.text,
   },
   priorityInfoCard: {
     flexDirection: 'row',

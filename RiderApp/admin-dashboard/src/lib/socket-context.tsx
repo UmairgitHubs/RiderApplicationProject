@@ -38,7 +38,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     });
 
     socketInstance.on('connect', () => {
-      console.log('Socket connected:', socketInstance.id);
+      console.log('✅ [Admin] Socket connected successfully. ID:', socketInstance.id);
       setIsConnected(true);
     });
 

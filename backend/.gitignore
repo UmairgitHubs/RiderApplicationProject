@@ -33,4 +33,7 @@ prisma/migrations/
 coverage/
 .nyc_output/
 
+react-native-16160-firebase-adminsdk-fbsvc-cba798ba33.json
+
+BACKEND_INDEX.md 
 

@@ -42,6 +42,7 @@ export const setupSocket = (io: Server) => {
 
     // Join user-specific room
     socket.join(`user:${userId}`);
+    logger.info(`✅ User joined room: user:${userId}`);
 
     // Join role-specific room
     socket.join(`role:${userRole}`);

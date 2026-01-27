@@ -47,12 +47,19 @@ export function TicketDetailsModal({ ticket: initialTicket, onClose }: TicketDet
 
   // Real-time message listener
   useEffect(() => {
-    if (!socket) return
+    if (!socket) {
+      console.log('❌ Socket not initialized in TicketDetailsModal')
+      return
+    }
+    console.log('✅ TicketDetailsModal listening for socket events on:', socket.id)
 
     const handleNewMessage = (data: any) => {
+      console.log('🔔 Socket event received (TicketDetailsModal):', data)
+      console.log('Current ticket ID:', initialTicket.id)
+      
       // Check if message belongs to current ticket
       if (data.ticketId === initialTicket.id || (data.message && data.message.ticket_id === initialTicket.id)) {
-        console.log('New message received:', data)
+        console.log('✅ Message belongs to this ticket. Updating cache.')
         
         const newMessage = data.message
         

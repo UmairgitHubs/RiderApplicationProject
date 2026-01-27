@@ -39,23 +39,51 @@ export class RouteService {
    * Create a new route
    */
   async createRoute(data: { name: string, hubId: string, riderId?: string | null, vehicleId?: string, stops: any[] }) {
-    return prisma.route.create({
-      data: {
-        name: data.name,
-        hub_id: data.hubId,
-        rider_id: data.riderId || null,
-        vehicle_id: data.vehicleId,
-        status: 'draft',
-        stops: {
-          create: data.stops.map((stop, index) => ({
-            stop_order: index + 1,
-            type: stop.type || 'delivery',
-            shipment_id: stop.shipmentId,
-            location: stop.location,
-          }))
+    return prisma.$transaction(async (tx) => {
+      // 1. Create the route
+      const route = await tx.route.create({
+        data: {
+          name: data.name,
+          hub_id: data.hubId,
+          rider_id: data.riderId || null,
+          vehicle_id: data.vehicleId,
+          status: 'draft',
+          stops: {
+            create: data.stops.map((stop, index) => ({
+              stop_order: index + 1,
+              type: stop.type || 'delivery',
+              shipment_id: stop.shipmentId,
+              location: stop.location,
+            }))
+          }
+        },
+        include: { stops: true }
+      });
+
+      // 2. If rider is assigned, update shipments
+      if (data.riderId && data.stops.length > 0) {
+        const shipmentIds = data.stops
+          .filter(s => s.shipmentId)
+          .map(s => s.shipmentId);
+          
+        if (shipmentIds.length > 0) {
+           await tx.shipment.updateMany({
+             where: { id: { in: shipmentIds } },
+             data: {
+               rider_id: data.riderId,
+               // We only set status to 'assigned' if the route is active, 
+               // but createRoute defaults to 'draft'. 
+               // However, if we want consistency, maybe we should leave status as is 
+               // until route becomes active?
+               // But the prompt says "Fix backend issue where shipment statuses were not updated to 'assigned' during automated route creation"
+               // Automated creation sets status='active'. Manual 'createRoute' sets 'draft'.
+               // If it's draft, we probably shouldn't set shipment to 'assigned' yet.
+             }
+           });
         }
-      },
-      include: { stops: true }
+      }
+      
+      return route;
     });
   }
 
@@ -92,6 +120,32 @@ export class RouteService {
             location: stop.location,
           }))
         });
+
+        // 4. Update Shipments if rider assigned
+        if (data.riderId) {
+            const shipmentIds = data.stops
+                .filter(s => s.shipmentId)
+                .map(s => s.shipmentId);
+
+            if (shipmentIds.length > 0) {
+                // Always sync rider_id
+                await tx.shipment.updateMany({
+                    where: { id: { in: shipmentIds } },
+                    data: { rider_id: data.riderId }
+                });
+
+                // If active, set pending shipments to assigned
+                if (data.status === 'active') {
+                    await tx.shipment.updateMany({
+                        where: { 
+                            id: { in: shipmentIds },
+                            status: 'pending'
+                        },
+                        data: { status: 'assigned' }
+                    });
+                }
+            }
+        }
       }
 
       return tx.route.findUnique({
