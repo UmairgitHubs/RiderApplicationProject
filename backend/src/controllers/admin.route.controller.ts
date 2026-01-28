@@ -131,10 +131,7 @@ export const updateRouteStatus = asyncHandler(async (req: AuthRequest, res: Resp
     const { id } = req.params;
     const { status } = req.body;
 
-    const route = await prisma.route.update({
-        where: { id },
-        data: { status }
-    });
+    const route = await routeService.updateStatus(id, status as string);
 
     res.json({ success: true, data: route });
 });

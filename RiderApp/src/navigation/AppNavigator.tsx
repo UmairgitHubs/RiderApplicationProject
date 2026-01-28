@@ -49,6 +49,10 @@ import VehicleInformationScreen from "../screens/rider/VehicleInformationScreen"
 import WorkingAreasScreen from "../screens/rider/WorkingAreasScreen";
 
 import RoutePlanningScreen from "../screens/rider/RoutePlanningScreen";
+import NavigationScreen from "../screens/rider/NavigationScreen";
+import QRScannerScreen from "../screens/rider/QRScannerScreen";
+import PickupConfirmationScreen from "../screens/rider/PickupConfirmationScreen";
+import DeliveryConfirmationScreen from "../screens/rider/DeliveryConfirmationScreen";
 import AboutScreen from "../screens/common/AboutScreen";
 import NotificationSettingsScreen from '../screens/common/NotificationSettingsScreen';
 import ComingSoonScreen from "../screens/common/ComingSoonScreen";
@@ -136,6 +140,17 @@ export type RootStackParamList = {
   FranchiseTracking: { shipmentId: string; trackingNumber?: string } | undefined;
   VehicleInformation: undefined;
   WorkingAreas: undefined;
+  Navigation: { 
+    type?: string; 
+    address?: string; 
+    latitude?: number; 
+    longitude?: number; 
+    recipientName?: string; 
+    trackingId?: string 
+  } | undefined;
+  QRScanner: { orderId: string; order: any; scanType?: 'pickup' | 'delivery' } | undefined;
+  PickupConfirmation: { orderId: string; order: any; scannedCode?: string; manualEntry?: boolean } | undefined;
+  DeliveryConfirmation: { orderId: string; order: any; scannedCode?: string; manualEntry?: boolean } | undefined;
 };
 
 const Stack = createStackNavigator<RootStackParamList>();
@@ -320,6 +335,10 @@ export default function AppNavigator() {
         <Stack.Screen name="FranchiseTracking" component={FranchiseTrackingScreen} />
         <Stack.Screen name="VehicleInformation" component={VehicleInformationScreen} />
         <Stack.Screen name="WorkingAreas" component={WorkingAreasScreen} />
+        <Stack.Screen name="Navigation" component={NavigationScreen} />
+        <Stack.Screen name="QRScanner" component={QRScannerScreen} />
+        <Stack.Screen name="PickupConfirmation" component={PickupConfirmationScreen} />
+        <Stack.Screen name="DeliveryConfirmation" component={DeliveryConfirmationScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

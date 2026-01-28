@@ -9,6 +9,12 @@ import { toast } from 'sonner'
 import Link from 'next/link'
 import EditHubModal from '@/components/hubs/EditHubModal'
 import DeleteHubModal from '@/components/hubs/DeleteHubModal'
+import { useShipments } from '@/hooks/useShipments'
+import ShipmentTable from '@/components/shipments/ShipmentTable'
+import AssignRiderModal from '@/components/shipments/AssignRiderModal'
+import { Shipment } from '@/types/shipment'
+import ShipmentDetailsModal from '@/components/shipments/ShipmentDetailsModal'
+import ShipmentMobileCard from '@/components/shipments/ShipmentMobileCard'
 
 export default function HubDetailsPage() {
   const params = useParams()
@@ -22,6 +28,41 @@ export default function HubDetailsPage() {
     queryFn: () => hubsApi.getById(hubId),
     enabled: !!hubId
   })
+
+  // Shipments Logic
+  const { data: shipmentsData, isLoading: isLoadingShipments, refetch: refetchShipments } = useShipments({
+      hubId: hubId,
+      status: 'received_at_hub',
+      limit: 50
+  })
+
+  // Map shipments data
+  const shipments: Shipment[] = (shipmentsData?.data?.shipments || []).map((s: any) => ({
+      id: s.trackingNumber || s.id,
+      date: new Date(s.createdAt).toLocaleString(),
+      merchant: { name: s.merchantName || 'Unknown', code: 'MER-...' },
+      customer: { name: s.recipientName, address: s.deliveryAddress },
+      rider: s.rider || 'Unassigned',
+      hub: s.hub || 'Unassigned',
+      status: s.status,
+      codAmount: Number(s.amount || s.codAmount || 0),
+      codStatus: s.paymentStatus || 'Pending',
+      priority: 'Normal'
+  }))
+
+  const [selectedShipment, setSelectedShipment] = useState<Shipment | null>(null)
+  const [isAssignModalOpen, setIsAssignModalOpen] = useState(false)
+  const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false)
+
+  const handleAssignClick = (shipment: Shipment) => {
+      setSelectedShipment(shipment)
+      setIsAssignModalOpen(true)
+  }
+
+  const handleViewClick = (shipment: Shipment) => {
+      setSelectedShipment(shipment)
+      setIsDetailsModalOpen(true)
+  }
 
   if (isLoading) {
     return (
@@ -223,6 +264,55 @@ export default function HubDetailsPage() {
         </div>
       </div>
 
+       {/* Shipments at Hub Section */}
+       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+            <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+                <div>
+                    <h3 className="font-bold text-gray-900">Shipments at Hub</h3>
+                    <p className="text-xs text-gray-500 mt-0.5">Shipments currently at this hub waiting for dispatch</p>
+                </div>
+                <div className="text-xs font-medium px-2 py-1 bg-purple-50 text-purple-700 rounded-md">
+                   {shipments.length} Pending
+                </div>
+            </div>
+            <div className="hidden md:block overflow-x-auto">
+                {isLoadingShipments ? (
+                     <div className="flex items-center justify-center py-10">
+                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                    </div>
+                ) : shipments.length > 0 ? (
+                    <ShipmentTable 
+                        shipments={shipments} 
+                        onViewClick={handleViewClick} 
+                    /> 
+                ) : (
+                    <div className="p-8 text-center text-gray-500 text-sm">
+                        No shipments currently at this hub.
+                    </div>
+                )}
+            </div>
+            
+            <div className="md:hidden p-4 space-y-4">
+                {isLoadingShipments ? (
+                     <div className="flex items-center justify-center py-10">
+                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                    </div>
+                ) : shipments.length > 0 ? (
+                    shipments.map((shipment) => (
+                        <ShipmentMobileCard 
+                            key={shipment.id}
+                            shipment={shipment}
+                            onViewClick={handleViewClick}
+                        />
+                    ))
+                ) : (
+                    <div className="p-8 text-center text-gray-500 text-sm">
+                        No shipments.
+                    </div>
+                )}
+            </div>
+      </div>
+
       <EditHubModal 
         isOpen={isEditModalOpen} 
         onClose={() => setIsEditModalOpen(false)} 
@@ -234,6 +324,22 @@ export default function HubDetailsPage() {
         hubId={hub.id}
         hubName={hub.name}
       />
+
+       {/* Modals */}
+       <AssignRiderModal 
+           shipment={selectedShipment} 
+           isOpen={isAssignModalOpen} 
+           onClose={() => setIsAssignModalOpen(false)} 
+           onSuccess={refetchShipments}
+           hubId={hub.id}
+       />
+       
+       <ShipmentDetailsModal
+           shipment={selectedShipment}
+           isOpen={isDetailsModalOpen}
+           onClose={() => setIsDetailsModalOpen(false)}
+           onEdit={() => {}} 
+       />
     </div>
   )
 }

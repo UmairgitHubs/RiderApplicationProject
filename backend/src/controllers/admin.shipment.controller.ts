@@ -10,20 +10,19 @@ import { asyncHandler } from '../middleware/async.middleware';
 export const getAllShipments = asyncHandler(async (req: AuthRequest, res: Response) => {
   const { status, page = 1, limit = 20, search, startDate, endDate, hubId, merchantId } = req.query;
 
-  const where: any = {};
+  const validStatusList = [
+    'pending', 'assigned', 'picked_up', 'received_at_hub', 'in_transit', 'delivered', 'cancelled', 'returned', 'failed'
+  ];
+
+  // Determine Global Filters (excluding status) for statistics
+  const globalWhere: any = {};
   
-  if (status && status !== 'all' && status !== 'All Status') {
-    where.status = status;
-  }
-
-  // Filter by Merchant
   if (merchantId) {
-    where.merchant_id = merchantId;
+    globalWhere.merchant_id = merchantId;
   }
 
-  // Search functionality
   if (search) {
-    where.OR = [
+    globalWhere.OR = [
       { tracking_number: { contains: search as string, mode: 'insensitive' } },
       { recipient_name: { contains: search as string, mode: 'insensitive' } },
       { delivery_address: { contains: search as string, mode: 'insensitive' } },
@@ -32,29 +31,56 @@ export const getAllShipments = asyncHandler(async (req: AuthRequest, res: Respon
     ];
   }
 
-  // Date Range Filtering
   if (startDate || endDate) {
-    where.created_at = {};
-    if (startDate) {
-      where.created_at.gte = new Date(startDate as string);
-    }
+    globalWhere.created_at = {};
+    if (startDate) globalWhere.created_at.gte = new Date(startDate as string);
     if (endDate) {
-      // Ensure end date covers the full day
       const end = new Date(endDate as string);
       end.setHours(23, 59, 59, 999);
-      where.created_at.lte = end;
+      globalWhere.created_at.lte = end;
     }
   }
 
-  // Hub Filtering
-  if (hubId && hubId !== 'all' && hubId !== 'All Hubs') {
-    where.rider = { rider: { hub_id: hubId } };
+  // Hub Manager Restriction & Filtering for Stats
+  let filterHubId = hubId as string;
+  if (req.user?.role === 'hub_manager') {
+      const managedHub = await prisma.hub.findFirst({ where: { manager_id: req.user.id } });
+      if (managedHub) filterHubId = managedHub.id;
+  }
+
+  if (filterHubId && filterHubId !== 'all' && filterHubId !== 'All Hubs') {
+    globalWhere.OR = [
+      { hub_id: filterHubId },
+      { rider: { rider: { hub_id: filterHubId } } }
+    ];
+  }
+
+  // Final Where clause for the data list
+  const where: any = { AND: [globalWhere] };
+  
+  if (status && status !== 'all' && status !== 'All Status') {
+     const s = (status as string).toLowerCase();
+     if (s === 'pending') {
+         where.AND.push({ status: { in: ['pending', 'assigned', 'scheduled'] } });
+     } else if (s === 'at_hub' || s === 'received_at_hub') {
+         where.AND.push({ status: 'received_at_hub' });
+     } else if (s === 'in_transit') {
+         where.AND.push({ status: { in: ['in_transit', 'picked_up'] } });
+     } else if (s === 'delivered') {
+         where.AND.push({ status: 'delivered' });
+     } else if (s === 'failed') {
+         where.AND.push({ status: 'failed' });
+     } else if (s === 'returned') {
+         where.AND.push({ status: { in: ['returned', 'cancelled'] } });
+     } else if (validStatusList.includes(s)) {
+         where.AND.push({ status: s });
+     }
   }
 
   const skip = (Number(page) - 1) * Number(limit);
   const take = Number(limit);
 
-  // Parallel fetch: data + count for pagination + status distribution
+  // Parallel fetch: data + list count + global status distribution
   const [shipments, total, statusDistribution] = await Promise.all([
     prisma.shipment.findMany({
       where,
@@ -62,39 +88,23 @@ export const getAllShipments = asyncHandler(async (req: AuthRequest, res: Respon
       take,
       orderBy: { created_at: 'desc' },
       include: {
-        merchant: {
-          select: {
-            id: true,
-            full_name: true,
-            email: true,
-          }
-        },
+        merchant: { select: { id: true, full_name: true, email: true } },
         rider: {
           select: {
             id: true,
             full_name: true,
             phone: true,
-            rider: {
-              select: { hub_id: true }
-            }
+            rider: { select: { hub_id: true } }
           }
         },
-        hub: {
-          select: {
-            id: true,
-            name: true,
-            city: true
-          }
-        },
-        packages: {
-          select: { id: true }
-        }
+        hub: { select: { id: true, name: true, city: true } },
+        packages: { select: { id: true } }
       } as any
     }),
     prisma.shipment.count({ where }),
     prisma.shipment.groupBy({
       by: ['status'],
-      where,
+      where: globalWhere, // Distribution based on filters EXCEPT status
       _count: { status: true }
     })
   ]);
@@ -102,16 +112,18 @@ export const getAllShipments = asyncHandler(async (req: AuthRequest, res: Respon
   // Define the statuses we want to track in the stats
   const statusSummary: Record<string, number> = {
     delivered: 0,
+    at_hub: 0,
     in_transit: 0,
     pending: 0,
     failed: 0,
     returned: 0
   };
 
-  // Populate counts from DB result, rolling up intermediate statuses if needed
+  // Populate counts from global DB result (respecting Hub/Search/Date)
   statusDistribution.forEach((group: any) => {
     const s = group.status.toLowerCase();
     if (s === 'delivered') statusSummary.delivered += group._count.status;
+    else if (s === 'received_at_hub') statusSummary.at_hub += group._count.status;
     else if (s === 'in_transit' || s === 'picked_up') statusSummary.in_transit += group._count.status;
     else if (s === 'pending' || s === 'assigned' || s === 'scheduled') statusSummary.pending += group._count.status;
     else if (s === 'failed') statusSummary.failed += group._count.status;
@@ -210,6 +222,7 @@ export const getShipmentById = asyncHandler(async (req: AuthRequest, res: Respon
       packages: {
         orderBy: { package_number: 'asc' }
       },
+      hub: true,
       tracking_history: {
         orderBy: { created_at: 'desc' },
         include: {
@@ -399,4 +412,75 @@ export const addShipmentNote = asyncHandler(async (req: AuthRequest, res: Respon
   });
 
   res.json({ success: true, message: "Note added successfully" });
+});
+
+/**
+ * Assign a rider to a shipment manually (Admin/Hub Manager)
+ */
+export const assignShipmentToRider = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const { id } = req.params;
+  const { riderId } = req.body;
+  const adminId = req.user?.id;
+
+  if (!riderId) {
+    res.status(400).json({ success: false, error: { message: "Rider ID is required" } });
+    return;
+  }
+
+  const shipment = await prisma.shipment.findUnique({
+    where: { id }
+  });
+
+  if (!shipment) {
+    res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Shipment not found' } });
+    return;
+  }
+
+  // Check if rider exists
+  const rider = await prisma.rider.findUnique({
+    where: { id: riderId },
+    include: { user: { select: { full_name: true, phone: true, email: true } } }
+  });
+
+  if (!rider) {
+     res.status(404).json({ success: false, error: { message: "Rider not found" } });
+     return;
+  }
+
+  // Update Shipment
+  const updatedShipment = await prisma.shipment.update({
+    where: { id },
+    data: {
+      rider_id: riderId,
+      status: 'assigned', // Reset to assigned for the new rider
+    }
+  });
+
+  // Track History
+  await prisma.shipmentTracking.create({
+    data: {
+      shipment_id: id,
+      status: 'assigned',
+      notes: `Assigned to rider ${rider.user.full_name}`,
+      updated_by: adminId
+    }
+  });
+
+  // Notification to Rider
+  await prisma.notification.create({
+    data: {
+      user_id: riderId,
+      title: 'New Shipment Assigned',
+      message: `You have been assigned shipment ${shipment.tracking_number} for delivery.`,
+      type: 'delivery',
+      reference_id: id,
+      reference_type: 'shipment'
+    }
+  });
+
+  res.json({
+    success: true,
+    data: { shipment: updatedShipment },
+    message: `Shipment assigned to ${rider.user.full_name}`
+  });
 });

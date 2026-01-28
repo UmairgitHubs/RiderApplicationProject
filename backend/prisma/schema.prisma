@@ -45,6 +45,7 @@ model User {
   tracking_updates      ShipmentTracking[]
   shipments_as_merchant Shipment[]          @relation("MerchantShipments")
   shipments_as_rider    Shipment[]          @relation("RiderShipments")
+  shipments_picked_up   Shipment[]          @relation("PickupRiderShipments")
   activity_logs         ActivityLog[]
   verification_codes    VerificationCode[]
   wallet_transactions   WalletTransaction[]
@@ -199,10 +200,13 @@ model Shipment {
   tracking_history        ShipmentTracking[]
   merchant                User               @relation("MerchantShipments", fields: [merchant_id], references: [id])
   rider                   User?              @relation("RiderShipments", fields: [rider_id], references: [id])
+  pickup_rider_id         String?
+  pickup_rider            User?              @relation("PickupRiderShipments", fields: [pickup_rider_id], references: [id])
   hub                     Hub?               @relation("ShipmentOriginHub", fields: [hub_id], references: [id])
   route_stops             RouteStop[]
   
   @@index([hub_id])
+  @@index([pickup_rider_id])
 
   @@index([merchant_id])
   @@index([rider_id])

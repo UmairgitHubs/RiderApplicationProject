@@ -62,7 +62,7 @@ export const useRiderDashboard = () => {
         riderApi.getActiveOrders(),
         riderApi.getEarnings({ startDate: today.toISOString() }),
         riderApi.getCompletedOrders({ limit: 5 }),
-        riderApi.getRoutes({ status: 'active,draft,pending' }).catch(err => { console.warn('Routes fetch failed', err); return { data: { routes: [] } }; })
+        riderApi.getRoutes({ status: 'active,draft,pending,assigned' }).catch(err => { console.warn('Routes fetch failed', err); return { data: { routes: [] } }; })
       ]);
 
       console.log('Earnings Response:', JSON.stringify(earningsResponse, null, 2));
@@ -78,7 +78,7 @@ export const useRiderDashboard = () => {
       // Process Routes for Counts
       const routes = routesResponse?.data?.routes || [];
       const activeRoute = routes.find((r: any) => r.status === 'active');
-      const pendingRoute = routes.find((r: any) => r.status === 'pending' || r.status === 'draft'); // "Standard" is usually pending
+      const pendingRoute = routes.find((r: any) => ['pending', 'assigned', 'draft'].includes(r.status));
 
       setRouteCounts({
           urgent: activeRoute?.stops?.filter((s:any) => s.status !== 'completed' && s.shipment?.status !== 'delivered').length ?? null,

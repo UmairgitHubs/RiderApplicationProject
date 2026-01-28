@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,118 +6,123 @@ import {
   ScrollView,
   TouchableOpacity,
   Platform,
+  RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { colors, typography, spacing, borderRadius } from '../../theme';
+import { riderApi } from '../../services/api';
 
 interface Transaction {
   id: string;
-  type: 'earnings' | 'withdrawal' | 'bonus';
+  type?: 'earnings' | 'withdrawal' | 'bonus'; // Optional as backend might not return it yet
   description: string;
-  amount: number;
-  date: string;
-  status: 'completed' | 'pending';
+  amount: string | number;
+  createdAt: string;
   orderId?: string;
+  status?: string;
+}
+
+interface EarningsData {
+  walletBalance: string;
+  totalEarnings: string;
+  periodEarnings: number;
+  totalDeliveries: number;
+  rating: string;
+  transactions: Transaction[];
 }
 
 export default function RiderEarningsScreen() {
   const navigation = useNavigation<any>();
   const [selectedPeriod, setSelectedPeriod] = useState<'today' | 'week' | 'month'>('today');
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [earningsData, setEarningsData] = useState<EarningsData | null>(null);
 
-  const earnings = {
-    available: 580.50,
-    today: 125.50,
-    thisWeek: 580.50,
-    thisMonth: 2345.75,
-    totalDeliveries: 42,
-    avgPerDelivery: 13.82,
+  const fetchEarnings = useCallback(async () => {
+    try {
+      // Calculate date range based on selectedPeriod
+      const now = new Date();
+      let startDate = new Date();
+      
+      if (selectedPeriod === 'today') {
+        startDate.setHours(0, 0, 0, 0);
+      } else if (selectedPeriod === 'week') {
+        const day = startDate.getDay();
+        const diff = startDate.getDate() - day + (day === 0 ? -6 : 1); // Adjust when day is sunday
+        startDate.setDate(diff);
+        startDate.setHours(0, 0, 0, 0);
+      } else {
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+      }
+
+      const response = await riderApi.getEarnings({ 
+        startDate: startDate.toISOString() 
+      });
+
+      if (response.data && response.data.success) {
+        setEarningsData(response.data.data);
+      }
+    } catch (error) {
+      console.error('Failed to fetch earnings:', error);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [selectedPeriod]);
+
+  useEffect(() => {
+    fetchEarnings();
+  }, [fetchEarnings]);
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    fetchEarnings();
   };
 
-  const transactions: Transaction[] = [
-    {
-      id: '1',
-      type: 'earnings',
-      description: 'Delivery #CE2024001234567',
-      amount: 45.99,
-      date: 'Today, 10:30 AM',
-      status: 'completed',
-      orderId: 'CE2024001234567',
-    },
-    {
-      id: '2',
-      type: 'earnings',
-      description: 'Delivery #CE2024001234568',
-      amount: 25.00,
-      date: 'Today, 09:15 AM',
-      status: 'completed',
-      orderId: 'CE2024001234568',
-    },
-    {
-      id: '3',
-      type: 'bonus',
-      description: 'Peak Hours Bonus',
-      amount: 15.00,
-      date: 'Today, 08:00 AM',
-      status: 'completed',
-    },
-    {
-      id: '4',
-      type: 'earnings',
-      description: 'Delivery #CE2024001234569',
-      amount: 39.51,
-      date: 'Yesterday, 6:45 PM',
-      status: 'completed',
-      orderId: 'CE2024001234569',
-    },
-    {
-      id: '5',
-      type: 'withdrawal',
-      description: 'Bank Transfer',
-      amount: 200.00,
-      date: 'Dec 28, 2024',
-      status: 'pending',
-    },
-  ];
-
-  const getTransactionIcon = (type: string) => {
+  const getTransactionIcon = (type: string = 'earnings') => {
     switch (type) {
-      case 'earnings':
-        return 'arrow-down-circle';
-      case 'withdrawal':
-        return 'arrow-up-circle';
-      case 'bonus':
-        return 'gift';
-      default:
-        return 'cash';
+      case 'withdrawal': return 'arrow-up-circle';
+      case 'bonus': return 'gift';
+      default: return 'arrow-down-circle';
     }
   };
 
-  const getTransactionColor = (type: string) => {
+  const getTransactionColor = (type: string = 'earnings') => {
     switch (type) {
-      case 'earnings':
-        return colors.success;
-      case 'withdrawal':
-        return colors.error;
-      case 'bonus':
-        return colors.warning;
-      default:
-        return colors.textLight;
+      case 'withdrawal': return colors.error;
+      case 'bonus': return colors.warning;
+      default: return colors.success;
     }
   };
 
-  const getCurrentPeriodEarnings = () => {
-    switch (selectedPeriod) {
-      case 'today':
-        return earnings.today;
-      case 'week':
-        return earnings.thisWeek;
-      case 'month':
-        return earnings.thisMonth;
-      default:
-        return earnings.today;
-    }
-  };
+  // Safe deduction of transactions with Unique Key enforcement
+  const transactions = React.useMemo(() => {
+    if (!earningsData?.transactions) return [];
+    
+    // Deduplicate by ID
+    const seen = new Set();
+    return earningsData.transactions.filter(t => {
+      if (seen.has(t.id)) return false;
+      seen.add(t.id);
+      return true;
+    });
+  }, [earningsData]);
+
+  if (loading && !refreshing) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
+
+  // Fallbacks
+  const walletBalance = Number(earningsData?.walletBalance || 0);
+  const periodEarnings = Number(earningsData?.periodEarnings || 0);
+  const totalDeliveries = earningsData?.totalDeliveries || 0;
+  const avgPerDelivery = totalDeliveries > 0 ? (Number(earningsData?.totalEarnings || 0) / totalDeliveries) : 0;
 
   return (
     <View style={styles.container}>
@@ -134,8 +139,8 @@ export default function RiderEarningsScreen() {
         <View style={styles.balanceCard}>
           <View style={styles.balanceInfo}>
             <Text style={styles.balanceLabel}>Available to Withdraw</Text>
-            <Text style={styles.balanceAmount}>${earnings.available.toFixed(2)}</Text>
-            <Text style={styles.balanceSubtext}>{earnings.totalDeliveries} deliveries completed</Text>
+            <Text style={styles.balanceAmount}>${walletBalance.toFixed(2)}</Text>
+            <Text style={styles.balanceSubtext}>{totalDeliveries} deliveries completed</Text>
           </View>
           <TouchableOpacity 
             style={styles.withdrawButton}
@@ -159,38 +164,26 @@ export default function RiderEarningsScreen() {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
       >
         {/* Period Selector */}
         <View style={styles.periodSelector}>
-          <TouchableOpacity
-            style={[styles.periodButton, selectedPeriod === 'today' && styles.periodButtonActive]}
-            onPress={() => setSelectedPeriod('today')}
-          >
-            <Text style={[styles.periodText, selectedPeriod === 'today' && styles.periodTextActive]}>
-              Today
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.periodButton, selectedPeriod === 'week' && styles.periodButtonActive]}
-            onPress={() => setSelectedPeriod('week')}
-          >
-            <Text style={[styles.periodText, selectedPeriod === 'week' && styles.periodTextActive]}>
-              This Week
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.periodButton, selectedPeriod === 'month' && styles.periodButtonActive]}
-            onPress={() => setSelectedPeriod('month')}
-          >
-            <Text style={[styles.periodText, selectedPeriod === 'month' && styles.periodTextActive]}>
-              This Month
-            </Text>
-          </TouchableOpacity>
+          {(['today', 'week', 'month'] as const).map((p) => (
+             <TouchableOpacity
+              key={p}
+              style={[styles.periodButton, selectedPeriod === p && styles.periodButtonActive]}
+              onPress={() => setSelectedPeriod(p)}
+            >
+              <Text style={[styles.periodText, selectedPeriod === p && styles.periodTextActive]}>
+                {p === 'today' ? 'Today' : p === 'week' ? 'This Week' : 'This Month'}
+              </Text>
+            </TouchableOpacity>
+          ))}
         </View>
 
         {/* Earnings Summary */}
         <View style={styles.summaryCard}>
-          <Text style={styles.summaryAmount}>${getCurrentPeriodEarnings().toFixed(2)}</Text>
+          <Text style={styles.summaryAmount}>${periodEarnings.toFixed(2)}</Text>
           <Text style={styles.summaryLabel}>
             {selectedPeriod === 'today' ? 'Today\'s Earnings' : 
              selectedPeriod === 'week' ? 'This Week\'s Earnings' : 
@@ -202,12 +195,12 @@ export default function RiderEarningsScreen() {
         <View style={styles.statsContainer}>
           <View style={styles.statCard}>
             <Ionicons name="cube" size={24} color={colors.primary} />
-            <Text style={styles.statNumber}>{earnings.totalDeliveries}</Text>
+            <Text style={styles.statNumber}>{totalDeliveries}</Text>
             <Text style={styles.statLabel}>Deliveries</Text>
           </View>
           <View style={styles.statCard}>
             <Ionicons name="trending-up" size={24} color={colors.success} />
-            <Text style={styles.statNumber}>${earnings.avgPerDelivery.toFixed(2)}</Text>
+            <Text style={styles.statNumber}>${avgPerDelivery.toFixed(2)}</Text>
             <Text style={styles.statLabel}>Avg/Delivery</Text>
           </View>
         </View>
@@ -221,76 +214,60 @@ export default function RiderEarningsScreen() {
             </TouchableOpacity>
           </View>
 
-          {transactions.map((transaction) => (
-            <TouchableOpacity 
-              key={transaction.id} 
-              style={styles.transactionCard}
-              onPress={() => {
-                if (transaction.orderId) {
-                  const parent = navigation.getParent();
-                  if (parent) {
-                    parent.navigate('RiderOrderDetails', { orderId: transaction.orderId });
-                  }
-                }
-              }}
-            >
-              <View 
-                style={[
-                  styles.transactionIcon,
-                  { backgroundColor: `${getTransactionColor(transaction.type)}20` }
-                ]}
-              >
-                <Ionicons 
-                  name={getTransactionIcon(transaction.type) as any} 
-                  size={24} 
-                  color={getTransactionColor(transaction.type)} 
-                />
-              </View>
-              
-              <View style={styles.transactionDetails}>
-                <Text style={styles.transactionDescription}>{transaction.description}</Text>
-                <View style={styles.transactionMeta}>
-                  <Text style={styles.transactionDate}>{transaction.date}</Text>
-                  {transaction.status === 'pending' && (
-                    <View style={styles.pendingBadge}>
-                      <Text style={styles.pendingText}>Pending</Text>
-                    </View>
-                  )}
-                </View>
-              </View>
-              
-              <Text 
-                style={[
-                  styles.transactionAmount,
-                  { color: transaction.type === 'withdrawal' ? colors.error : colors.success }
-                ]}
-              >
-                {transaction.type === 'withdrawal' ? '-' : '+'}${transaction.amount.toFixed(2)}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+          {transactions.length === 0 ? (
+             <View style={styles.emptyState}>
+                <Ionicons name="receipt-outline" size={48} color={colors.textLight} />
+                <Text style={styles.emptyText}>No transactions found for this period</Text>
+             </View>
+          ) : (
+            transactions.map((transaction) => {
+              const amount = Number(transaction.amount);
+              const type = transaction.type || 'earnings';
+              const date = new Date(transaction.createdAt).toLocaleString();
 
-        {/* Earnings Tips */}
-        <View style={styles.tipsCard}>
-          <View style={styles.tipsHeader}>
-            <Ionicons name="bulb" size={24} color={colors.warning} />
-            <Text style={styles.tipsTitle}>Earning Tips</Text>
-          </View>
-          <View style={styles.tipsList}>
-            <View style={styles.tipItem}>
-              <Ionicons name="checkmark-circle" size={16} color={colors.success} />
-              <Text style={styles.tipText}>Complete deliveries during peak hours for bonuses</Text>
-            </View>
-            <View style={styles.tipItem}>
-              <Ionicons name="checkmark-circle" size={16} color={colors.success} />
-              <Text style={styles.tipText}>Maintain high ratings to unlock premium orders</Text>
-            </View>
-            <View style={styles.tipItem}>
-              <Ionicons name="checkmark-circle" size={16} color={colors.success} />
-              <Text style={styles.tipText}>Complete 10+ deliveries daily for extra rewards</Text>
-            </View>
-          </View>
+              return (
+                <TouchableOpacity 
+                  key={transaction.id} 
+                  style={styles.transactionCard}
+                  onPress={() => {
+                    if (transaction.orderId) {
+                       // Try to navigate to order details if possible
+                       // Or simple alert for now
+                    }
+                  }}
+                >
+                  <View 
+                    style={[
+                      styles.transactionIcon,
+                      { backgroundColor: `${getTransactionColor(type)}20` }
+                    ]}
+                  >
+                    <Ionicons 
+                      name={getTransactionIcon(type) as any} 
+                      size={24} 
+                      color={getTransactionColor(type)} 
+                    />
+                  </View>
+                  
+                  <View style={styles.transactionDetails}>
+                    <Text style={styles.transactionDescription} numberOfLines={1}>{transaction.description}</Text>
+                    <View style={styles.transactionMeta}>
+                      <Text style={styles.transactionDate}>{date}</Text>
+                    </View>
+                  </View>
+                  
+                  <Text 
+                    style={[
+                      styles.transactionAmount,
+                      { color: type === 'withdrawal' ? colors.error : colors.success }
+                    ]}
+                  >
+                    {type === 'withdrawal' ? '-' : '+'}${amount.toFixed(2)}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })
+          )}
         </View>
       </ScrollView>
     </View>
@@ -301,6 +278,11 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.backgroundLight,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   orangeHeader: {
     backgroundColor: colors.primary,
@@ -499,52 +481,19 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.xs,
     color: colors.textLight,
   },
-  pendingBadge: {
-    backgroundColor: colors.warning,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    borderRadius: borderRadius.sm,
-  },
-  pendingText: {
-    fontSize: typography.fontSize.xs,
-    color: colors.textWhite,
-    fontWeight: typography.fontWeight.medium,
-  },
   transactionAmount: {
     fontSize: typography.fontSize.lg,
     fontWeight: typography.fontWeight.bold,
   },
-  tipsCard: {
-    backgroundColor: '#FFF9F0',
-    borderRadius: borderRadius.lg,
-    padding: spacing.lg,
-    borderLeftWidth: 4,
-    borderLeftColor: colors.warning,
+  emptyState: {
+    alignItems: 'center', 
+    padding: 30,
+    opacity: 0.7 
   },
-  tipsHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginBottom: spacing.md,
-  },
-  tipsTitle: {
-    fontSize: typography.fontSize.lg,
-    fontWeight: typography.fontWeight.bold,
-    color: colors.text,
-  },
-  tipsList: {
-    gap: spacing.sm,
-  },
-  tipItem: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: spacing.sm,
-  },
-  tipText: {
-    flex: 1,
-    fontSize: typography.fontSize.sm,
-    color: colors.text,
-    lineHeight: 20,
-  },
+  emptyText: {
+    marginTop: 10,
+    color: colors.textLight,
+    fontStyle: 'italic'
+  }
 });
 

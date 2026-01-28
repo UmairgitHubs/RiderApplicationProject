@@ -38,8 +38,10 @@ export class RouteService {
   /**
    * Create a new route
    */
-  async createRoute(data: { name: string, hubId: string, riderId?: string | null, vehicleId?: string, stops: any[] }) {
+  async createRoute(data: { name: string, hubId: string, riderId?: string | null, vehicleId?: string, stops: any[], status?: string }) {
     return prisma.$transaction(async (tx) => {
+      const routeStatus = data.status || 'draft';
+
       // 1. Create the route
       const route = await tx.route.create({
         data: {
@@ -47,13 +49,15 @@ export class RouteService {
           hub_id: data.hubId,
           rider_id: data.riderId || null,
           vehicle_id: data.vehicleId,
-          status: 'draft',
+          status: routeStatus,
           stops: {
             create: data.stops.map((stop, index) => ({
               stop_order: index + 1,
               type: stop.type || 'delivery',
               shipment_id: stop.shipmentId,
               location: stop.location,
+              latitude: stop.latitude,
+              longitude: stop.longitude,
             }))
           }
         },
@@ -67,18 +71,16 @@ export class RouteService {
           .map(s => s.shipmentId);
           
         if (shipmentIds.length > 0) {
+           const updateData: any = { rider_id: data.riderId };
+           
+           // If route is active, set shipments to assigned
+           if (routeStatus === 'active') {
+               updateData.status = 'assigned';
+           }
+
            await tx.shipment.updateMany({
              where: { id: { in: shipmentIds } },
-             data: {
-               rider_id: data.riderId,
-               // We only set status to 'assigned' if the route is active, 
-               // but createRoute defaults to 'draft'. 
-               // However, if we want consistency, maybe we should leave status as is 
-               // until route becomes active?
-               // But the prompt says "Fix backend issue where shipment statuses were not updated to 'assigned' during automated route creation"
-               // Automated creation sets status='active'. Manual 'createRoute' sets 'draft'.
-               // If it's draft, we probably shouldn't set shipment to 'assigned' yet.
-             }
+             data: updateData
            });
         }
       }
@@ -118,6 +120,8 @@ export class RouteService {
             type: stop.type || 'delivery',
             shipment_id: stop.shipmentId,
             location: stop.location,
+            latitude: stop.latitude,
+            longitude: stop.longitude,
           }))
         });
 
@@ -139,7 +143,7 @@ export class RouteService {
                     await tx.shipment.updateMany({
                         where: { 
                             id: { in: shipmentIds },
-                            status: 'pending'
+                            status: { in: ['pending', 'received_at_hub'] }
                         },
                         data: { status: 'assigned' }
                     });
@@ -152,6 +156,40 @@ export class RouteService {
         where: { id },
         include: { stops: true }
       });
+    });
+  }
+
+  /**
+   * Update Route Status and sync shipments
+   */
+  async updateStatus(id: string, status: string) {
+    return prisma.$transaction(async (tx) => {
+      const route = await tx.route.update({
+        where: { id },
+        data: { status },
+        include: { stops: true }
+      });
+
+      if (status === 'active' && route.rider_id) {
+          const shipmentIds = route.stops
+              .filter(s => s.shipment_id)
+              .map(s => s.shipment_id as string);
+
+          if (shipmentIds.length > 0) {
+              await tx.shipment.updateMany({
+                  where: { 
+                      id: { in: shipmentIds },
+                      status: { in: ['pending', 'received_at_hub'] }
+                  },
+                  data: { 
+                      status: 'assigned',
+                      rider_id: route.rider_id
+                  }
+              });
+          }
+      }
+
+      return route;
     });
   }
 
@@ -209,8 +247,12 @@ export class RouteService {
    */
   async getUnassignedShipments(hubId?: string) {
     const where: Prisma.ShipmentWhereInput = {
-      status: { in: ['pending', 'picked_up', 'in_transit'] }
+      status: { in: ['pending', 'assigned', 'picked_up', 'in_transit', 'received_at_hub', 'scheduled'] }
     };
+
+    if (hubId && hubId !== 'all') {
+        where.hub_id = hubId;
+    }
 
     const shipments = await prisma.shipment.findMany({
       where,
@@ -225,13 +267,42 @@ export class RouteService {
             route: {
               status: { in: ['draft', 'active'] }
             }
+          },
+          include: {
+            route: {
+                select: { status: true, rider_id: true }
+            }
           }
         }
       },
       orderBy: { created_at: 'desc' }
     });
 
-    return shipments.filter(s => (s as any).route_stops.length === 0);
+    // In-memory filter to handle complex "Stale Route" logic
+    return shipments.filter(s => {
+        // If no active/draft routes involve this shipment, it's free.
+        if (s.route_stops.length === 0) return true;
+
+        // Check if any existing route stop is "blocking" (valid and pending)
+        const hasBlockingStop = s.route_stops.some(stop => {
+            // Completed stops never block
+            if (stop.status === 'completed') return false;
+
+            // Draft routes always block (planning in progress)
+            if (stop.route.status === 'draft') return true;
+
+            // Active routes block only if the rider matches (actively assigned)
+            // If rider mismatches (e.g. s.rider_id is null/different), it's a stale/past connection
+            if (stop.route.status === 'active') {
+                return stop.route.rider_id === s.rider_id;
+            }
+
+            return false;
+        });
+
+        // If no blocking stops found, we can show it as unassigned
+        return !hasBlockingStop;
+    });
   }
 
   /**
@@ -267,7 +338,7 @@ export class RouteService {
         tx.hub.findMany({ where: { is_active: true } }),
         tx.shipment.findMany({
            where: { 
-             status: 'pending',
+             status: { in: ['pending', 'received_at_hub'] },
              route_stops: { none: { route: { status: { in: ['draft', 'active'] } } } }
            }
         }),
@@ -368,28 +439,33 @@ export class RouteService {
 
            // Create Stops: Pickups then Deliveries
            const stopsData: any[] = [];
-           // Pickups
+           
+           // Process Pickups
            batch.forEach((s, idx) => {
+             const isAtHub = s.status === 'received_at_hub';
              stopsData.push({
                 route_id: route.id,
                 shipment_id: s.id,
                 stop_order: idx + 1,
                 type: 'pickup',
-                location: s.pickup_address,
-                latitude: s.pickup_latitude,
-                longitude: s.pickup_longitude
+                location: isAtHub ? (hub.address || hub.name) : s.pickup_address,
+                latitude: isAtHub ? hub.latitude : s.pickup_latitude,
+                longitude: isAtHub ? hub.longitude : s.pickup_longitude
              });
            });
-           // Deliveries
+
+           // Process Deliveries
            batch.forEach((s, idx) => {
+             const isFirstLeg = s.status !== 'received_at_hub';
              stopsData.push({
                 route_id: route.id,
                 shipment_id: s.id,
                 stop_order: batch.length + idx + 1,
                 type: 'delivery',
-                location: s.delivery_address,
-                latitude: s.delivery_latitude,
-                longitude: s.delivery_longitude
+                // If it's Merchant -> Hub, delivery is at Hub. Otherwise, Customer.
+                location: isFirstLeg ? (hub.address || hub.name) : s.delivery_address,
+                latitude: isFirstLeg ? hub.latitude : s.delivery_latitude,
+                longitude: isFirstLeg ? hub.longitude : s.delivery_longitude
              });
            });
 

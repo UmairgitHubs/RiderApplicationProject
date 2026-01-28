@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useSearchParams, usePathname, useRouter } from 'next/navigation'
 import { useShipments, useAllShipments } from '@/hooks/useShipments'
 import { useHubs } from '@/hooks/useHubs'
@@ -15,7 +15,8 @@ import {
   XCircle, 
   RotateCcw,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  MapPin
 } from 'lucide-react'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
@@ -26,6 +27,7 @@ import ShipmentMobileCard from '@/components/shipments/ShipmentMobileCard'
 import ShipmentDetailsModal from '@/components/shipments/ShipmentDetailsModal'
 import EditShipmentModal from '@/components/shipments/EditShipmentModal'
 import ExportShipmentsModal from '@/components/shipments/ExportShipmentsModal'
+import AssignRiderModal from '@/components/shipments/AssignRiderModal'
 import { Shipment } from '@/types/shipment'
 
 function useDebounce(callback: Function, delay: number) {
@@ -60,6 +62,7 @@ export default function ShipmentsPage() {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [isExportModalOpen, setIsExportModalOpen] = useState(false)
+  const [isAssignModalOpen, setIsAssignModalOpen] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
 
   const page = Number(searchParams.get('page')) || 1
@@ -107,6 +110,7 @@ export default function ShipmentsPage() {
       endDate
   })
 
+  // Hook to fetch all for exports
   const { refetch: fetchAll } = useAllShipments({
       search: searchQuery,
       status: statusFilter,
@@ -225,36 +229,51 @@ export default function ShipmentsPage() {
   const totalPages = data?.data?.pagination?.totalPages || 1
   const totalRecords = data?.data?.pagination?.total || 0
   const filteredStats = data?.data?.stats || []
+  const statsTotal = filteredStats.reduce((acc: number, curr: any) => acc + Number(curr.value), 0)
+
   const getCount = (statusName: string) => {
     const stat = filteredStats.find((s: any) => s.name.toLowerCase() === statusName.toLowerCase())
     return stat ? stat.value.toString() : '0'
   }
   
   const stats = [
-    { label: 'Total Shipments', value: totalRecords.toString(), icon: Box, color: 'text-primary', bg: 'bg-primary-50', border: 'border-l-4 border-primary' },
+    { label: 'Total Shipments', value: statsTotal.toString(), icon: Box, color: 'text-primary', bg: 'bg-primary-50', border: 'border-l-4 border-primary' },
     { label: 'Delivered', value: getCount('Delivered'), icon: CheckCircle2, color: 'text-green-500', bg: 'bg-green-50', border: 'border-l-4 border-green-500' },
+    { label: 'At Hub', value: getCount('At Hub'), icon: MapPin, color: 'text-purple-500', bg: 'bg-purple-50', border: 'border-l-4 border-purple-500' },
     { label: 'In Transit', value: getCount('In Transit'), icon: Truck, color: 'text-blue-500', bg: 'bg-blue-50', border: 'border-l-4 border-blue-500' },
     { label: 'Pending', value: getCount('Pending'), icon: Clock, color: 'text-yellow-500', bg: 'bg-yellow-50', border: 'border-l-4 border-yellow-500' },
-    { label: 'Failed', value: getCount('Failed'), icon: XCircle, color: 'text-red-500', bg: 'bg-red-50', border: 'border-l-4 border-red-500' },
-    { label: 'Returned', value: getCount('Returned'), icon: RotateCcw, color: 'text-purple-500', bg: 'bg-purple-50', border: 'border-l-4 border-purple-500' },
+    { label: 'Failed/Returned', value: (Number(getCount('Failed')) + Number(getCount('Returned'))).toString(), icon: XCircle, color: 'text-red-500', bg: 'bg-red-50', border: 'border-l-4 border-red-500' },
   ]
 
   const rawShipments = data?.data?.shipments || []
-  const shipments: Shipment[] = rawShipments.map((s: any) => ({
-    id: s.trackingNumber || s.id,
-    date: new Date(s.createdAt).toLocaleString(),
-    merchant: { name: s.merchantName || 'Unknown', code: 'MER-...' },
-    customer: { name: s.recipientName, address: s.deliveryAddress },
-    rider: s.rider || 'Unassigned',
-    hub: s.hub || 'Unassigned',
-    status: s.status,
-    codAmount: Number(s.amount || s.codAmount || 0),
-    codStatus: s.paymentStatus || 'Pending',
-    priority: 'Normal'
-  }))
+  
+  // Deduplicate and Map
+  const shipments: Shipment[] = useMemo(() => {
+    const seen = new Set();
+    return rawShipments
+      .filter((s: any) => {
+        const id = s.trackingNumber || s.id;
+        if (seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      })
+      .map((s: any) => ({
+        id: s.trackingNumber || s.id,
+        date: new Date(s.createdAt).toLocaleString(),
+        merchant: { name: s.merchantName || 'Unknown', code: 'MER-...' },
+        customer: { name: s.recipientName, address: s.deliveryAddress },
+        rider: s.rider || 'Unassigned',
+        hub: s.hub || 'Unassigned',
+        status: s.status,
+        codAmount: Number(s.amount || s.codAmount || 0),
+        codStatus: s.paymentStatus || 'Pending',
+        priority: 'Normal'
+      }));
+  }, [rawShipments]);
 
   const handleViewShipment = (shipment: Shipment) => { setSelectedShipment(shipment); setIsModalOpen(true) }
   const handleEditShipment = (shipment?: Shipment) => { if (shipment) setSelectedShipment(shipment); setIsModalOpen(false); setIsEditModalOpen(true) }
+  const handleAssignShipment = (shipment: Shipment) => { setSelectedShipment(shipment); setIsAssignModalOpen(true) }
 
   return (
     <div className="space-y-6">
@@ -329,6 +348,7 @@ export default function ShipmentsPage() {
             <option value="pending">Pending</option>
             <option value="assigned">Assigned</option>
             <option value="picked_up">Picked Up</option>
+            <option value="received_at_hub">At Hub</option>
             <option value="in_transit">In Transit</option>
             <option value="delivered">Delivered</option>
             <option value="cancelled">Cancelled</option>
@@ -354,7 +374,7 @@ export default function ShipmentsPage() {
       ) : (
         <>
           <div className="md:hidden space-y-4">
-            {shipments.map((shipment) => (
+             {shipments.map((shipment) => (
               <ShipmentMobileCard 
                 key={shipment.id} 
                 shipment={shipment}
@@ -362,18 +382,22 @@ export default function ShipmentsPage() {
                 onEditClick={handleEditShipment}
               />
             ))}
-            <div className="flex justify-between items-center pt-2">
-              <PaginationButton onClick={() => handlePageChange(page - 1)} disabled={page <= 1} isMobile={true}>Previous</PaginationButton>
-              <span className="text-sm text-gray-500">Page {page} of {totalPages}</span>
-              <PaginationButton onClick={() => handlePageChange(page + 1)} disabled={page >= totalPages} isMobile={true}>Next</PaginationButton>
-            </div>
+             <div className="flex justify-between items-center pt-2">
+               <PaginationButton onClick={() => handlePageChange(page - 1)} disabled={page <= 1} isMobile={true}>Previous</PaginationButton>
+               <span className="text-sm text-gray-500">Page {page} of {totalPages}</span>
+               <PaginationButton onClick={() => handlePageChange(page + 1)} disabled={page >= totalPages} isMobile={true}>Next</PaginationButton>
+             </div>
           </div>
 
           <div className="hidden md:block bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
             <div className="overflow-x-auto">
-               <ShipmentTable shipments={shipments} onViewClick={handleViewShipment} onEditClick={handleEditShipment} />
+               <ShipmentTable 
+                  shipments={shipments} 
+                  onViewClick={handleViewShipment} 
+                  onEditClick={handleEditShipment} 
+               />
             </div>
-            <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 bg-gray-50/50">
+             <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 bg-gray-50/50">
               <p className="text-sm text-gray-500">
                 Showing <span className="font-medium">{(page - 1) * limit + 1}</span> to <span className="font-medium">{Math.min(page * limit, totalRecords)}</span> of <span className="font-medium">{totalRecords}</span> results
               </p>
@@ -388,6 +412,7 @@ export default function ShipmentsPage() {
       
       <ShipmentDetailsModal shipment={selectedShipment} isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onEdit={handleEditShipment} />
       <EditShipmentModal key={selectedShipment?.id || 'edit-modal'} shipmentId={selectedShipment?.id || null} isOpen={isEditModalOpen} onClose={() => setIsEditModalOpen(false)} onShipmentUpdated={refetch} />
+      <AssignRiderModal shipment={selectedShipment} isOpen={isAssignModalOpen} onClose={() => setIsAssignModalOpen(false)} onSuccess={refetch} />
       <ExportShipmentsModal isOpen={isExportModalOpen} onClose={() => setIsExportModalOpen(false)} onExport={(format) => triggerExport(format as 'labels' | 'csv' | 'pdf')} totalShipments={totalRecords} filters={{ search: searchQuery, status: statusFilter, dateRange: getDateRangeValue(), hub: hubFilter }} />
     </div>
   )

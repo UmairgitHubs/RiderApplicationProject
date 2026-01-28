@@ -58,7 +58,10 @@ export const getAllHubs = asyncHandler(async (req: AuthRequest, res: Response) =
           const stats = await prisma.shipment.groupBy({
               by: ['status'],
               where: {
-                  rider_id: { in: riderIds }
+                  OR: [
+                      { hub_id: hub.id },
+                      { rider_id: { in: riderIds } }
+                  ]
               },
               _count: { status: true }
           });
@@ -300,7 +303,10 @@ export const getHubById = asyncHandler(async (req: AuthRequest, res: Response) =
       const stats = await prisma.shipment.groupBy({
           by: ['status'],
           where: {
-              rider_id: { in: riderIds }
+              OR: [
+                  { hub_id: hub.id },
+                  { rider_id: { in: riderIds } }
+              ]
           },
           _count: { status: true }
       });

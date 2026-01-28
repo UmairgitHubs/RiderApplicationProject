@@ -56,8 +56,19 @@ export const createShipment = async (req: Request, res: Response) => {
 
     // Find Origin Hub
     let originHubId = null;
-    if (pickupCity) {
-      const normalizedCity = pickupCity.trim();
+    let targetCity = pickupCity;
+
+    // Fallback to merchant city if pickup city is missing
+    if (!targetCity) {
+        const merchantProfile = await prisma.merchant.findUnique({
+            where: { id: userId },
+            select: { city: true }
+        });
+        targetCity = merchantProfile?.city;
+    }
+
+    if (targetCity) {
+      const normalizedCity = targetCity.trim();
       // Try exact or case-insensitive match
       let hub = await prisma.hub.findFirst({
         where: {
@@ -65,7 +76,7 @@ export const createShipment = async (req: Request, res: Response) => {
         }
       });
       
-      // Fallback: Try contains (e.g. 'West End' finding 'Hub West End' if city is stored weirdly or vice versa)
+      // Fallback: Try contains
       if (!hub) {
          hub = await prisma.hub.findFirst({
             where: {
@@ -574,12 +585,12 @@ export const getShipmentDetails = async (req: Request, res: Response) => {
             email: true, 
             full_name: true, 
             phone: true, 
-            merchant: { select: { business_name: true } }
+            merchant: { select: { business_name: true, address: true } }
           } 
         },
         rider: { select: { id: true, full_name: true, phone: true } },
         // @ts-ignore
-        hub: { select: { id: true, name: true, city: true } },
+        hub: { select: { id: true, name: true, city: true, address: true, latitude: true, longitude: true } },
         packages: { orderBy: { package_number: 'asc' } },
         tracking_history: { orderBy: { created_at: 'desc' }, take: 10 },
         route_stops: {
@@ -611,7 +622,42 @@ export const getShipmentDetails = async (req: Request, res: Response) => {
       });
     }
 
-    res.json({ success: true, data: { shipment } });
+    // Check if shipment has ever reached a hub (for second leg logic)
+    const hasReachedHub = shipment.status === 'received_at_hub' || 
+                         shipment.tracking_history.some(h => h.status === 'received_at_hub');
+
+    // Effective Pickup Logic: Use Hub coordinates if at hub, assigned to next leg, or missing pickup coords
+    const useHubForPickup = (
+        shipment.status === 'received_at_hub' || 
+        (shipment.status === 'assigned' && (hasReachedHub || (shipment as any).pickup_rider_id)) ||
+        (!shipment.pickup_latitude && shipment.hub)
+    );
+    
+    const formattedShipment = {
+        ...shipment,
+        merchant: {
+           ...shipment.merchant,
+           business_name: shipment.merchant?.merchant?.business_name,
+           address: shipment.merchant?.merchant?.address
+        },
+        pickupLatitude: useHubForPickup && shipment.hub?.latitude 
+            ? parseFloat(shipment.hub.latitude.toString()) 
+            : (shipment.pickup_latitude ? parseFloat(shipment.pickup_latitude.toString()) : 0),
+        
+        pickupLongitude: useHubForPickup && shipment.hub?.longitude
+            ? parseFloat(shipment.hub.longitude.toString())
+            : (shipment.pickup_longitude ? parseFloat(shipment.pickup_longitude.toString()) : 0),
+
+        deliveryLatitude: shipment.delivery_latitude ? parseFloat(shipment.delivery_latitude.toString()) : 0,
+        deliveryLongitude: shipment.delivery_longitude ? parseFloat(shipment.delivery_longitude.toString()) : 0,
+        
+        // Ensure address matches the coordinates
+        pickup_address: useHubForPickup && shipment.hub?.address 
+            ? shipment.hub.address 
+            : shipment.pickup_address,
+    };
+
+    res.json({ success: true, data: { shipment: formattedShipment } });
   } catch (error: any) {
     logger.error('Get shipment details error:', error);
     res.status(500).json({

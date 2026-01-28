@@ -5,7 +5,8 @@ import {
   updateShipment,
   adminCancelShipment,
   addShipmentNote,
-  getHubList
+  getHubList,
+  assignShipmentToRider
 } from '../controllers/admin.shipment.controller';
 import { authenticate } from '../middleware/auth.middleware';
 import { requireAdmin } from '../middleware/admin.middleware';
@@ -22,5 +23,6 @@ router.get('/:id', getShipmentById);
 router.patch('/:id', updateShipment);
 router.post('/:id/cancel', adminCancelShipment);
 router.post('/:id/note', addShipmentNote);
+router.post('/:id/assign', assignShipmentToRider);
 
 export default router;

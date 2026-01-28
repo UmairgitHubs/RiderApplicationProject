@@ -97,35 +97,72 @@ export default function RouteManagementPage() {
       {/* Hub Overview Section */}
       <HubOverview />
 
-      {/* All Routes Section */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 min-h-[300px]">
-        <div className="flex justify-between items-center mb-6">
-            <div>
-                <h3 className="font-bold text-gray-900 text-lg">All Routes</h3>
-                <span className="text-gray-400 text-sm">({routes.length})</span>
+      {/* Sections: Urgent and Next Day */}
+      <div className="space-y-8">
+        {/* Urgent Routes */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 min-h-[100px]">
+          <div className="flex justify-between items-center mb-6">
+            <div className="flex items-center gap-3">
+              <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+              <h3 className="font-bold text-gray-900 text-lg uppercase tracking-wider">Urgent Routes</h3>
+              <span className="text-gray-400 text-sm font-bold">
+                ({routes.filter(r => r.status === 'In Progress' || r.status === 'Active').length})
+              </span>
             </div>
-            <button className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-900">
-                <SlidersHorizontal className="w-4 h-4" /> Filter by Hub
-            </button>
-        </div>
-        
-        {isLoadingRoutes ? (
-            <div className="flex justify-center items-center py-20">
-                <Loader2 className="w-8 h-8 text-orange-500 animate-spin" />
+          </div>
+
+          {isLoadingRoutes ? (
+            <div className="flex justify-center items-center py-10">
+              <Loader2 className="w-8 h-8 text-orange-500 animate-spin" />
             </div>
-        ) : (
+          ) : (
             <div className="space-y-4">
-                {routes.length > 0 ? (
-                    routes.map(route => (
-                        <RouteCard key={route.id} route={route} />
-                    ))
-                ) : (
-                    <div className="text-center py-10 text-gray-500">
-                        No active routes found. Create a new route to get started.
-                    </div>
-                )}
+              {routes.filter(r => r.status === 'In Progress' || r.status === 'Active').length > 0 ? (
+                routes
+                  .filter(r => r.status === 'In Progress' || r.status === 'Active')
+                  .map(route => <RouteCard key={route.id} route={route} />)
+              ) : (
+                <div className="text-center py-6 text-gray-400 text-sm italic font-medium">
+                  No routes currently in progress.
+                </div>
+              )}
             </div>
-        )}
+          )}
+        </div>
+
+        {/* Next Day Routes */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 min-h-[300px]">
+          <div className="flex justify-between items-center mb-6">
+            <div className="flex items-center gap-3">
+              <div className="w-2 h-2 rounded-full bg-blue-500" />
+              <h3 className="font-bold text-gray-900 text-lg uppercase tracking-wider">Next Day Routes</h3>
+              <span className="text-gray-400 text-sm font-bold">
+                ({routes.filter(r => r.status !== 'In Progress' && r.status !== 'Active' && r.status !== 'Completed').length})
+              </span>
+            </div>
+            <button className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-900 font-bold uppercase tracking-tighter">
+              <SlidersHorizontal className="w-4 h-4" /> Filter by Hub
+            </button>
+          </div>
+
+          {isLoadingRoutes ? (
+            <div className="flex justify-center items-center py-10">
+              <Loader2 className="w-8 h-8 text-orange-500 animate-spin" />
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {routes.filter(r => r.status !== 'In Progress' && r.status !== 'Active' && r.status !== 'Completed').length > 0 ? (
+                routes
+                  .filter(r => r.status !== 'In Progress' && r.status !== 'Active' && r.status !== 'Completed')
+                  .map(route => <RouteCard key={route.id} route={route} />)
+              ) : (
+                <div className="text-center py-10 text-gray-500">
+                  No planned routes found. Create a new route to get started.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       <AvailableRiders />

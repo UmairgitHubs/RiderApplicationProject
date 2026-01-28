@@ -52,5 +52,9 @@ export const adminShipmentsApi = {
   getHubs: async () => {
     const response = await api.get('/admin/shipments/hubs')
     return response.data
+  },
+  assignRider: async (id: string, riderId: string) => {
+    const response = await api.post(`/admin/shipments/${id}/assign`, { riderId });
+    return response.data
   }
 }

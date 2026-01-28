@@ -7,14 +7,15 @@ interface UseRidersParams {
   search?: string
   status?: string
   isOnline?: string
+  hubId?: string
 }
 
 export function useRiders(params: UseRidersParams = {}) {
-  const { page = 1, search = '', status = 'all', isOnline = 'all' } = params
+  const { page = 1, search = '', status = 'all', isOnline = 'all', hubId } = params
 
   return useQuery({
-    queryKey: ['riders', page, search, status, isOnline],
-    queryFn: () => ridersApi.getAll({ page, search, status, is_online: isOnline }),
+    queryKey: ['riders', page, search, status, isOnline, hubId],
+    queryFn: () => ridersApi.getAll({ page, search, status, is_online: isOnline, hubId }),
     placeholderData: keepPreviousData
   })
 }

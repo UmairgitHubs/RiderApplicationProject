@@ -7,7 +7,7 @@ import { asyncHandler } from '../middleware/async.middleware';
  * Get all riders (Admin View)
  */
 export const getAllRiders = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { search, page = 1, limit = 20, status, is_online } = req.query;
+  const { search, page = 1, limit = 20, status, is_online, hubId } = req.query;
 
   const where: any = { role: 'rider' };
   
@@ -32,6 +32,14 @@ export const getAllRiders = asyncHandler(async (req: AuthRequest, res: Response)
     where.rider = { 
         ...where.rider,
         is_online: is_online === 'true' 
+    };
+  }
+
+  // Hub Filter
+  if (hubId && hubId !== 'all') {
+    where.rider = {
+        ...where.rider,
+        hub_id: hubId
     };
   }
 

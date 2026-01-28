@@ -1,7 +1,7 @@
 import api from './client'
 
 export const ridersApi = {
-  getAll: async (params?: { search?: string; page?: number; limit?: number; status?: string; is_online?: string }) => {
+  getAll: async (params?: { search?: string; page?: number; limit?: number; status?: string; is_online?: string; hubId?: string }) => {
     const response = await api.get('/admin/riders', { params })
     return response.data
   },

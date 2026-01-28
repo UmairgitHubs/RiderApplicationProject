@@ -27,9 +27,10 @@ export const getAvailableOrders = async (req: Request, res: Response) => {
 
     // Find pending shipments
     // In production, use proper geospatial queries to find nearby shipments
+    // Find pending shipments or those received at hub waiting for dispatch
     const shipments = await prisma.shipment.findMany({
       where: {
-        status: 'pending',
+        status: { in: ['pending', 'received_at_hub'] },
         rider_id: null,
       },
       include: {
@@ -40,30 +41,45 @@ export const getAvailableOrders = async (req: Request, res: Response) => {
             phone: true,
           },
         },
+        hub: {
+          select: {
+            name: true,
+            address: true,
+            latitude: true,
+            longitude: true,
+          }
+        }
       },
       orderBy: { created_at: 'desc' },
       take: 50,
     });
 
     // Calculate distance and filter (simplified - should use proper geospatial calculation)
-    const availableOrders = shipments.map((shipment) => ({
-      id: shipment.id,
-      trackingNumber: shipment.tracking_number,
-      pickupAddress: shipment.pickup_address,
-      deliveryAddress: shipment.delivery_address,
-      deliveryFee: shipment.delivery_fee,
-      codAmount: shipment.cod_amount,
-      pickupLatitude: shipment.pickup_latitude,
-      pickupLongitude: shipment.pickup_longitude,
-      deliveryLatitude: shipment.delivery_latitude,
-      deliveryLongitude: shipment.delivery_longitude,
-      distance: shipment.distance_km ? `${shipment.distance_km} km` : null, // Use pre-calc if available
-      estimatedTime: shipment.estimated_delivery_time,
-      merchant: shipment.merchant,
-      createdAt: shipment.created_at,
-      packageType: shipment.package_type,
-      packageWeight: shipment.package_weight,
-    }));
+    const availableOrders = shipments.map((s) => {
+      const isSecondLeg = s.status === 'received_at_hub';
+      const pickupAddress = isSecondLeg ? (s.hub?.address || s.hub?.name || 'Hub') : s.pickup_address;
+      const deliveryAddress = isSecondLeg ? s.delivery_address : (s.hub?.address || s.hub?.name || s.delivery_address);
+
+      return {
+        id: s.id,
+        trackingNumber: s.tracking_number,
+        pickupAddress,
+        deliveryAddress,
+        deliveryFee: s.delivery_fee,
+        codAmount: s.cod_amount,
+        pickupLatitude: isSecondLeg ? Number(s.hub?.latitude) : s.pickup_latitude,
+        pickupLongitude: isSecondLeg ? Number(s.hub?.longitude) : s.pickup_longitude,
+        deliveryLatitude: isSecondLeg ? s.delivery_latitude : Number(s.hub?.latitude),
+        deliveryLongitude: isSecondLeg ? s.delivery_longitude : Number(s.hub?.longitude),
+        distance: s.distance_km ? `${s.distance_km} km` : null,
+        estimatedTime: s.estimated_delivery_time,
+        merchant: s.merchant,
+        createdAt: s.created_at,
+        packageType: s.package_type,
+        packageWeight: s.package_weight,
+        status: s.status
+      };
+    });
 
     res.json({
       success: true,
@@ -103,7 +119,7 @@ export const acceptOrder = async (req: Request, res: Response) => {
       });
     }
 
-    if (shipment.status !== 'pending') {
+    if (!['pending', 'received_at_hub'].includes(shipment.status)) {
       return res.status(400).json({
         success: false,
         error: {
@@ -189,7 +205,7 @@ export const acceptOrder = async (req: Request, res: Response) => {
 export const pickupOrder = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user?.id;
-    const { shipmentId } = req.body;
+    const { shipmentId, condition } = req.body;
 
     const shipment = await prisma.shipment.findUnique({
       where: { id: shipmentId },
@@ -229,18 +245,22 @@ export const pickupOrder = async (req: Request, res: Response) => {
       });
     }
 
-    // Allow 'pending' status if assigned via route (fallback for legacy data issues)
-    if (shipment.status !== 'assigned' && !(shipment.status === 'pending' && isAssignedViaRoute)) {
+    // Allow 'pending' or 'received_at_hub' statuses if assigned via route
+    const validStatuses = ['assigned', 'pending', 'received_at_hub'];
+    if (!validStatuses.includes(shipment.status)) {
       return res.status(400).json({
         success: false,
         error: {
           code: 'INVALID_STATUS',
-          message: `Shipment status (${shipment.status}) is invalid for pickup. Must be assigned.`,
+          message: `Shipment status (${shipment.status}) is invalid for pickup. Must be one of: ${validStatuses.join(', ')}.`,
         },
       });
     }
 
     // Update shipment status
+    const isSecondLeg = !!shipment.pickup_rider_id && !!shipment.hub_id;
+    const trackingNoteBase = isSecondLeg ? 'Picked Up from Hub' : 'Picked Up from Merchant';
+
     const updatedShipment = await prisma.shipment.update({
       where: { id: shipmentId },
       data: {
@@ -250,12 +270,22 @@ export const pickupOrder = async (req: Request, res: Response) => {
       },
     });
 
+    // CRITICAL: Complete the Pickup Route Stop to advance navigation
+    await prisma.routeStop.updateMany({
+        where: {
+            shipment_id: shipmentId,
+            type: 'pickup',
+            route: { rider_id: userId }
+        },
+        data: { status: 'completed' }
+    });
+
     // Create tracking entry
     await prisma.shipmentTracking.create({
       data: {
         shipment_id: shipmentId,
         status: 'picked_up',
-        notes: 'Picked up by rider',
+        notes: `${trackingNoteBase}. ${condition ? `Condition: ${condition}.` : ''} ${req.body.scannedCode ? `Scan: ${req.body.scannedCode}` : ''}`,
         updated_by: userId,
       },
     });
@@ -289,6 +319,152 @@ export const pickupOrder = async (req: Request, res: Response) => {
       error: {
         code: 'INTERNAL_ERROR',
         message: 'An error occurred while picking up the order.',
+      },
+    });
+  }
+};
+
+// Drop off at Hub (First Leg)
+export const dropOffAtHub = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.id;
+    const { shipmentId } = req.body;
+
+    const shipment = await prisma.shipment.findUnique({
+      where: { id: shipmentId },
+    });
+
+    if (!shipment) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: 'NOT_FOUND',
+          message: 'Shipment not found.',
+        },
+      });
+    }
+
+    if (shipment.rider_id !== userId) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'FORBIDDEN',
+          message: 'You are not assigned to this shipment.',
+        },
+      });
+    }
+
+    // Must be picked up first
+    if (shipment.status !== 'picked_up') {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'INVALID_STATUS',
+          message: 'Shipment must be picked up before dropping at hub.',
+        },
+      });
+    }
+
+    // Check if it has an origin hub assigned
+    if (!shipment.hub_id) {
+       // If no hub assignments, we can't drop at hub.
+       // However, for individual orders, maybe we assign the nearest hub now? 
+       // For now, fail if no hub.
+       return res.status(400).json({
+          success: false,
+          error: {
+            code: 'NO_HUB_ASSIGNED',
+            message: 'This shipment is not assigned to any hub.',
+          }
+       });
+    }
+
+    // Find active route for this shipment/rider to check completion later
+    // We do this BEFORE the update just to get the ID, but we check status AFTER
+    const activeRoute = await prisma.route.findFirst({
+        where: {
+            rider_id: userId,
+            status: 'active',
+            stops: { some: { shipment_id: shipmentId } }
+        }
+    });
+
+    // Update shipment to 'received_at_hub'
+    // Clear current rider_id so it can be assigned to next rider
+    // Save current rider to pickup_rider_id
+    const updatedShipment = await prisma.shipment.update({
+      where: { id: shipmentId },
+      data: {
+        status: 'received_at_hub',
+        rider_id: null, 
+        pickup_rider_id: userId,
+        // We could also add a 'received_at_hub_time' if we had the field
+      },
+    });
+
+    // Create tracking entry
+    await prisma.shipmentTracking.create({
+      data: {
+        shipment_id: shipmentId,
+        status: 'received_at_hub',
+        notes: 'Submitted to Hub',
+        updated_by: userId,
+      },
+    });
+
+    // Close the stop in the rider's route
+    // Specifically the DELIVERY leg to the hub
+    await prisma.routeStop.updateMany({
+        where: {
+            shipment_id: shipmentId,
+            type: 'delivery',
+            route: {
+                rider_id: userId
+            }
+        },
+        data: {
+            status: 'completed'
+        }
+    });
+
+    // Check if Route is Complete
+    if (activeRoute) {
+        const pendingCount = await prisma.routeStop.count({
+            where: {
+                route_id: activeRoute.id,
+                status: 'pending'
+            }
+        });
+
+        if (pendingCount === 0) {
+            await prisma.route.update({
+                where: { id: activeRoute.id },
+                data: {
+                    status: 'completed',
+                    end_time: new Date()
+                }
+            });
+        }
+    }
+
+    // Notification to Merchant (optional)
+    // Notification to Hub Manager (if we can identify them)
+
+    res.json({
+        success: true,
+        data: {
+            shipment: updatedShipment
+        },
+        message: 'Shipment dropped off at hub successfully.'
+    });
+
+  } catch (error: any) {
+    logger.error('Drop off at hub error:', error);
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'An error occurred while dropping off at hub.',
       },
     });
   }
@@ -366,6 +542,14 @@ export const getActiveOrders = async (req: Request, res: Response) => {
             phone: true,
           },
         },
+        hub: { // Include Hub details
+            select: {
+                name: true,
+                address: true,
+                latitude: true,
+                longitude: true
+            }
+        },
         tracking_history: {
           orderBy: { created_at: 'desc' },
           take: 1,
@@ -377,29 +561,39 @@ export const getActiveOrders = async (req: Request, res: Response) => {
     res.json({
       success: true,
       data: {
-        orders: shipments.map((s) => ({
-          id: s.id,
-          trackingNumber: s.tracking_number,
-          status: s.status,
-          recipientName: s.recipient_name,
-          recipientPhone: s.recipient_phone,
-          pickupAddress: s.pickup_address,
-          deliveryAddress: s.delivery_address,
-          deliveryFee: s.delivery_fee,
-          codAmount: s.cod_amount,
-          distanceKm: s.distance_km,
-          estimatedDeliveryTime: s.estimated_delivery_time,
-          scheduledDeliveryTime: s.scheduled_delivery_time,
-          merchant: s.merchant,
-          lastUpdate: s.tracking_history[0]?.created_at,
-          packageType: s.package_type,
-          shipmentType: s.shipment_type,
-          specialInstructions: s.special_instructions,
-          deliveryLatitude: s.delivery_latitude,
-          deliveryLongitude: s.delivery_longitude,
-          pickupLatitude: s.pickup_latitude,
-          pickupLongitude: s.pickup_longitude,
-        })),
+        orders: shipments.map((s) => {
+          // If it's a second leg (Hub -> Customer), Pickup is the Hub
+          const isSecondLeg = !!s.pickup_rider_id && !!s.hub_id;
+          const pickupAddress = isSecondLeg ? (s.hub?.address || s.hub?.name) : s.pickup_address;
+          const pickupLatitude = isSecondLeg ? Number(s.hub?.latitude) : s.pickup_latitude;
+          const pickupLongitude = isSecondLeg ? Number(s.hub?.longitude) : s.pickup_longitude;
+
+          return {
+            id: s.id,
+            trackingNumber: s.tracking_number,
+            status: s.status,
+            recipientName: s.recipient_name,
+            recipientPhone: s.recipient_phone,
+            pickupAddress: pickupAddress,
+            deliveryAddress: s.delivery_address,
+            deliveryFee: s.delivery_fee,
+            codAmount: s.cod_amount,
+            distanceKm: s.distance_km,
+            estimatedDeliveryTime: s.estimated_delivery_time,
+            scheduledDeliveryTime: s.scheduled_delivery_time,
+            merchant: s.merchant,
+            lastUpdate: s.tracking_history[0]?.created_at,
+            packageType: s.package_type,
+            shipmentType: s.shipment_type,
+            specialInstructions: s.special_instructions,
+            deliveryLatitude: s.delivery_latitude,
+            deliveryLongitude: s.delivery_longitude,
+            pickupLatitude: pickupLatitude,
+            pickupLongitude: pickupLongitude,
+            hubId: s.hub_id,
+            pickupRiderId: s.pickup_rider_id
+          };
+        }),
       },
     });
   } catch (error: any) {
@@ -468,6 +662,15 @@ export const completeDelivery = async (req: Request, res: Response) => {
       });
     }
 
+    // Check for active route before update
+    const activeRoute = await prisma.route.findFirst({
+        where: {
+            rider_id: userId,
+            status: 'active',
+            stops: { some: { shipment_id: shipmentId } }
+        }
+    });
+
     // Update shipment
     const updatedShipment = await prisma.shipment.update({
       where: { id: shipmentId },
@@ -477,21 +680,45 @@ export const completeDelivery = async (req: Request, res: Response) => {
         actual_delivery_time: new Date(),
         payment_status: Number(shipment.cod_amount) > 0 ? 'pending' : 'paid',
         // Also update the route stop status if this shipment is part of a route
+        // CRITICAL: Specifically complete the DELIVERY stop.
         route_stops: {
           updateMany: {
-            where: { shipment_id: shipmentId },
+            where: { 
+                shipment_id: shipmentId,
+                type: 'delivery' // Only close the delivery leg
+            },
             data: { status: 'completed' }
           }
         }
       },
     });
 
+    // Check if Route is Complete
+    if (activeRoute) {
+        const pendingCount = await prisma.routeStop.count({
+            where: {
+                route_id: activeRoute.id,
+                status: 'pending'
+            }
+        });
+
+        if (pendingCount === 0) {
+            await prisma.route.update({
+                where: { id: activeRoute.id },
+                data: {
+                    status: 'completed',
+                    end_time: new Date()
+                }
+            });
+        }
+    }
+
     // Create tracking entry
     await prisma.shipmentTracking.create({
       data: {
         shipment_id: shipmentId,
         status: 'delivered',
-        notes: notes || 'Delivery completed',
+        notes: notes || `Delivered to Customer. ${req.body.paymentMethod ? `Paid via ${req.body.paymentMethod}.` : ''} ${req.body.scannedCode ? `Scan: ${req.body.scannedCode}` : ''}`,
         updated_by: userId,
       },
     });
@@ -926,6 +1153,70 @@ export const getPerformanceStats = async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       error: { code: 'INTERNAL_ERROR', message: 'Error fetching stats' }
+    });
+  }
+};
+
+// Start a route (Move from Next Day/Assigned to Urgent/Active)
+export const startRoute = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.id;
+    const { routeId } = req.body;
+
+    const route = await prisma.route.findUnique({
+      where: { id: routeId },
+    });
+
+    if (!route) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'Route not found.' },
+      });
+    }
+
+    if (route.rider_id !== userId) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'You are not assigned to this route.' },
+      });
+    }
+
+    // Update status to active
+    const updatedRoute = await prisma.route.update({
+      where: { id: routeId },
+      data: { status: 'active' },
+    });
+
+    // Also ensure all pending shipments in this route are marked as 'assigned' if they weren't already
+    // This handles the "All shipments... must now be considered active stops" req
+    const stops = await prisma.routeStop.findMany({
+        where: { route_id: routeId },
+        include: { shipment: true }
+    });
+    
+    // Check if stop is a first leg or second leg and handle accordingly if needed
+    // But primarily just ensure status 'assigned' for pending shipments so they show up for rider actions.
+    const shipmentIds = stops
+        .filter(s => s.shipment_id && s.shipment?.status === 'pending')
+        .map(s => s.shipment_id as string);
+
+    if (shipmentIds.length > 0) {
+        await prisma.shipment.updateMany({
+            where: { id: { in: shipmentIds } },
+            data: { status: 'assigned' }
+        });
+    }
+
+    res.json({
+      success: true,
+      data: { route: updatedRoute },
+      message: 'Route started successfully.',
+    });
+  } catch (error: any) {
+    logger.error('Start route error:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: 'Failed to start route.' },
     });
   }
 };

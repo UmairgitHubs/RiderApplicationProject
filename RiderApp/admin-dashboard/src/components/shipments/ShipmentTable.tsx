@@ -4,17 +4,24 @@ import { Shipment } from '@/types/shipment'
 interface ShipmentTableProps {
   shipments: Shipment[]
   onViewClick: (shipment: Shipment) => void
-  onEditClick: (shipment: Shipment) => void
+  onEditClick?: (shipment: Shipment) => void
+  onAssignClick?: (shipment: Shipment) => void
 }
 
-export default function ShipmentTable({ shipments, onViewClick, onEditClick }: ShipmentTableProps) {
+export default function ShipmentTable({ shipments, onViewClick, onEditClick, onAssignClick }: ShipmentTableProps) {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'Out for Delivery': return 'bg-sky-400 text-white' 
-      case 'At Hub': return 'bg-orange-400 text-white'
-      case 'Delivered': return 'bg-green-500 text-white'
-      case 'Created': return 'bg-gray-500 text-white'
+      case 'Out for Delivery': 
+      case 'in_transit': return 'bg-sky-400 text-white' 
+      case 'At Hub': 
+      case 'received_at_hub': return 'bg-purple-500 text-white' // Distinct color for At Hub
+      case 'Delivered': 
+      case 'delivered': return 'bg-green-500 text-white'
+      case 'Created': 
+      case 'pending': 
+      case 'assigned': return 'bg-gray-500 text-white'
+      case 'picked_up': return 'bg-orange-400 text-white' // Picked up usually means en route to hub or customer
       default: return 'bg-gray-100 text-gray-800'
     }
   }
@@ -66,7 +73,7 @@ export default function ShipmentTable({ shipments, onViewClick, onEditClick }: S
             </td>
             <td className="px-4 py-4 align-top">
               <div className="flex items-center">
-                {shipment.rider === 'Unassigned' ? (
+                {shipment.rider === 'Unassigned' || !shipment.rider ? (
                   <span className="text-gray-400 italic">Unassigned</span>
                 ) : (
                   <span className="text-gray-900">{shipment.rider}</span>
@@ -79,12 +86,12 @@ export default function ShipmentTable({ shipments, onViewClick, onEditClick }: S
               </div>
             </td>
             <td className="px-4 py-4 align-top">
-              <span className={`inline-flex px-3 py-2 rounded-full text-xs font-semibold leading-none text-center justify-center items-center min-w-[80px] ${getStatusColor(shipment.status)}`}>
-                {shipment.status.replace(/ /g, '\n')}
-              </span>
+              <div className={`px-3 py-1.5 rounded-full text-xs font-semibold text-center w-fit whitespace-nowrap ${getStatusColor(shipment.status)}`}>
+                {shipment.status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+              </div>
             </td>
             <td className="px-4 py-4 align-top">
-              <div className="font-bold text-gray-900">${shipment.codAmount.toFixed(2)}</div>
+              <div className="font-bold text-gray-900">${shipment.codAmount?.toFixed(2) || '0.00'}</div>
               <div className="text-xs text-gray-500">{shipment.codStatus}</div>
             </td>
             <td className="px-4 py-4 align-top">
@@ -104,18 +111,29 @@ export default function ShipmentTable({ shipments, onViewClick, onEditClick }: S
                 >
                   <Eye className="w-4 h-4" />
                 </button>
-                <button 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onEditClick(shipment);
-                  }}
-                  className="p-1.5 text-blue-500 hover:bg-blue-50 rounded-md transition-colors"
-                >
-                  <Edit2 className="w-4 h-4" />
-                </button>
-                {shipment.status === 'Created' && (
-                    <button className="p-1.5 text-green-500 hover:bg-green-50 rounded-md transition-colors">
-                      <Share2 className="w-4 h-4" />
+                {onEditClick && (
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onEditClick(shipment);
+                    }}
+                    className="p-1.5 text-blue-500 hover:bg-blue-50 rounded-md transition-colors"
+                    title="Edit"
+                  >
+                    <Edit2 className="w-4 h-4" />
+                  </button>
+                )}
+                {shipment.status === 'received_at_hub' && onAssignClick && (
+                    <button 
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onAssignClick(shipment);
+                        }}
+                        className="p-1.5 text-purple-600 hover:bg-purple-50 rounded-md transition-colors font-medium text-xs flex items-center gap-1"
+                        title="Assign Rider"
+                    >
+                      <Share2 className="w-4 h-4" /> 
+                      <span className="hidden xl:inline">Dispatch</span>
                     </button>
                 )}
               </div>

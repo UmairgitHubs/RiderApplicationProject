@@ -33,6 +33,7 @@ export default function RoutePlanningScreen() {
       onRefresh,
       handleStartNavigation,
       handleViewFullRoute,
+      handleStartRoute,
       stats,
       isAssignedRoute
   } = useRoutePlanning(initialType);
@@ -183,13 +184,17 @@ export default function RoutePlanningScreen() {
             </View>
             <View style={styles.routeStatItem}>
               <Ionicons name="location-outline" size={20} color={colors.textWhite} />
-              <Text style={styles.routeStatValue}>{routeStats.totalKm}</Text>
+              <Text style={styles.routeStatValue}>
+                  {routeStats.totalKm > 0 ? routeStats.totalKm : '-'}
+              </Text>
               <Text style={styles.routeStatLabel}>Total KM</Text>
             </View>
             <View style={styles.routeStatItem}>
               <Ionicons name="time-outline" size={20} color={colors.textWhite} />
-              <Text style={styles.routeStatValue}>{routeStats.totalMinutes}</Text>
-              <Text style={styles.routeStatLabel}>Total Min</Text>
+              <Text style={styles.routeStatValue}>
+                  {routeStats.totalMinutes > 0 ? Math.round(routeStats.totalMinutes / 60 * 10) / 10 + 'h' : '-'}
+              </Text>
+              <Text style={styles.routeStatLabel}>Duration</Text>
             </View>
           </View>
 
@@ -270,14 +275,14 @@ export default function RoutePlanningScreen() {
 
             <TouchableOpacity
               style={styles.startNavigationButton}
-              onPress={() => navigation.navigate('RiderOrderDetails', { orderId: currentStop.id })}
+              onPress={() => navigation.navigate('RiderOrderDetails', { orderId: currentStop.shipmentId })}
             >
               <LinearGradient
                 colors={currentStop.type === 'urgent' ? ['#F44336', '#FF6B00'] : ['#2196F3', '#42A5F5']}
                 style={styles.startNavigationButtonGradient}
               >
-                <Ionicons name="document-text-outline" size={20} color={colors.textWhite} />
-                <Text style={styles.startNavigationButtonText}>View Order Details</Text>
+                <Ionicons name="navigate-outline" size={20} color={colors.textWhite} />
+                <Text style={styles.startNavigationButtonText}>Start Navigation</Text>
               </LinearGradient>
             </TouchableOpacity>
           </View>
@@ -373,30 +378,45 @@ export default function RoutePlanningScreen() {
           </View>
         </View>
 
-        {/* Priority Information */}
-        <View style={[
-          styles.priorityInfoCard,
-          routeType === 'nextDay' && styles.priorityInfoCardNextDay
-        ]}>
-          <Ionicons 
-            name={routeType === 'urgent' ? "flash" : "map-outline"} 
-            size={20} 
-            color={routeType === 'urgent' ? "#F44336" : "#2196F3"} 
-          />
-          <View style={styles.priorityInfoContent}>
-            <Text style={[
-              styles.priorityInfoTitle,
-              routeType === 'nextDay' && styles.priorityInfoTitleNextDay
+        {/* Priority Information or Start Route Action */}
+        {routeType === 'nextDay' && isAssignedRoute ? (
+            <TouchableOpacity
+              style={[styles.viewFullRouteButton, { marginBottom: 16, backgroundColor: colors.primary }]}
+              onPress={handleStartRoute}
+            >
+              <LinearGradient
+                colors={['#FF6B00', '#FF8C33']}
+                style={styles.viewFullRouteButtonGradient}
+              >
+                <Ionicons name="play-circle" size={24} color={colors.textWhite} />
+                <Text style={styles.viewFullRouteButtonText}>START THIS ROUTE</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+        ) : (
+            <View style={[
+              styles.priorityInfoCard,
+              routeType === 'nextDay' && styles.priorityInfoCardNextDay
             ]}>
-              {routeType === 'urgent' ? 'Priority Same-Day Route' : 'Next-Day Route'}
-            </Text>
-            <Text style={styles.priorityInfoText}>
-               {routeType === 'urgent' 
-                ? 'This route contains urgent same-day deliveries optimized for minimum travel.'
-                : 'This route has been optimized for efficiency. These deliveries can be completed tomorrow.'}
-            </Text>
-          </View>
-        </View>
+              <Ionicons 
+                name={routeType === 'urgent' ? "flash" : "map-outline"} 
+                size={20} 
+                color={routeType === 'urgent' ? "#F44336" : "#2196F3"} 
+              />
+              <View style={styles.priorityInfoContent}>
+                <Text style={[
+                  styles.priorityInfoTitle,
+                  routeType === 'nextDay' && styles.priorityInfoTitleNextDay
+                ]}>
+                  {routeType === 'urgent' ? 'Priority Same-Day Route' : 'Next-Day Route'}
+                </Text>
+                <Text style={styles.priorityInfoText}>
+                   {routeType === 'urgent' 
+                    ? 'This route contains urgent same-day deliveries optimized for minimum travel.'
+                    : 'This route is scheduled for tomorrow. Start it now to move it to Urgent.'}
+                </Text>
+              </View>
+            </View>
+        )}
 
         {/* View Full Route Button */}
         <TouchableOpacity

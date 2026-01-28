@@ -5,6 +5,7 @@ import { riderApi } from '../services/api';
 
 export interface RouteStop {
   id: string;
+  shipmentId: string;
   trackingId: string;
   recipient: string;
   address: string;
@@ -180,8 +181,18 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
         const shipment = nearest.shipment || nearest;
         const { lat, lng, address, taskType } = getStopInfo(nearest);
         
-        // Dynamic Service Time
-        const serviceTimeDiff = parseInt(shipment.estimatedDeliveryTime || shipment.estimated_delivery_time || shipment.estimatedTime || String(DEFAULT_SERVICE_TIME_MIN));
+        // Dynamic Service Time - Ensure we handle ISO dates vs numbers correctly
+        let serviceTimeDiff = DEFAULT_SERVICE_TIME_MIN;
+        const estTime = shipment.estimatedDeliveryTime || shipment.estimated_delivery_time || shipment.estimatedTime;
+        
+        if (estTime) {
+            // If it's a number or numeric string
+            if (!isNaN(Number(estTime))) {
+                serviceTimeDiff = parseInt(String(estTime));
+            } 
+            // If it's likely a Date, we can't easily infer "duration" from a timestamp without start time
+            // So we stick to default for service time duration
+        }
         
         // Travel Time Estimation
         const roadDistanceKm = minDist * ROAD_FACTOR;
@@ -194,7 +205,8 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
         now.setMinutes(now.getMinutes() + accumulatedTimeMin);
 
         optimizedStops.push({
-            id: shipment.id || nearest.id,
+            id: nearest.id || `${shipment.id || 'unknown'}-${taskType}-${stopOrderCounter}`,
+            shipmentId: shipment.id,
             trackingId: shipment.trackingNumber || shipment.tracking_number || '',
             recipient: shipment.recipientName || shipment.recipient_name || 'Customer',
             address: address,
@@ -219,12 +231,13 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
              const s = u.shipment || u;
              const { taskType } = getStopInfo(u);
              optimizedStops.push({
-                 id: s.id || u.id,
+                 id: u.id || `${s.id || 'unknown'}-${taskType}-${stopOrderCounter}`,
+                 shipmentId: s.id,
                  trackingId: s.trackingNumber || '',
                  recipient: s.recipientName || 'Unknown',
                  address: s.address || 'Unknown',
-                 distance: 'N/A',
-                 estimatedTime: 'N/A',
+                 distance: '0 km', // Invalid coords = 0 km
+                 estimatedTime: `${DEFAULT_SERVICE_TIME_MIN} min`,
                  status: 'pending',
                  type,
                  taskType,
@@ -241,11 +254,30 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
   }, [calculateDistance]);
 
   const calculateStats = useCallback((stopsList: RouteStop[], overrides?: { totalKm?: number, totalMinutes?: number }) => {
-    const totalKm = overrides?.totalKm ?? stopsList.reduce((sum, stop) => sum + (parseFloat(stop.distance) || 0), 0);
-    const serviceTime = stopsList.reduce((sum, stop) => sum + (parseInt(stop.estimatedTime) || 10), 0);
+    // robust sum
+    const sumKm = stopsList.reduce((sum, stop) => {
+        const d = parseFloat(stop.distance);
+        return sum + (isNaN(d) ? 0 : d);
+    }, 0);
+    
+    // Use override ONLY if it's a valid positive number
+    // This fixes the "0 KM" issue when backend sends initialized 0
+    const totalKm = (overrides?.totalKm && overrides.totalKm > 0.1) 
+        ? overrides.totalKm 
+        : sumKm;
+
+    const serviceTime = stopsList.reduce((sum, stop) => {
+        const t = parseInt(stop.estimatedTime);
+        return sum + (isNaN(t) ? 10 : t);
+    }, 0);
+    
     const travelBuffer = Math.max(0, stopsList.length - 1) * DEFAULT_STOP_TIME_MIN;
     const calcMinutes = serviceTime + travelBuffer;
-    const totalMinutes = overrides?.totalMinutes ?? calcMinutes;
+    
+    const totalMinutes = (overrides?.totalMinutes && overrides.totalMinutes > 1) 
+        ? overrides.totalMinutes 
+        : calcMinutes;
+        
     const completedStops = stopsList.filter(s => s.status === 'completed').length;
 
     setRouteStats({
@@ -260,10 +292,21 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
   // --- Sync Logic: Raw Data + Location -> Stops ---
   useEffect(() => {
      const processRoute = () => {
-         const activeRoute = rawRoutes.find((r: any) => r.status === 'active');
-         const pendingRoute = rawRoutes.find((r: any) => r.status === 'pending' || r.status === 'draft');
+         // STRICT LOGIC:
+         // - "Urgent" Tab = Status 'active' (In Progress)
+         // - "Next Day" Tab = Status 'assigned' | 'pending' | 'draft' (Not started yet)
          
-         const targetRoute = routeType === 'urgent' ? activeRoute : pendingRoute;
+         const activeRoute = rawRoutes.find((r: any) => r.status === 'active');
+         const pendingRoute = rawRoutes.find((r: any) => ['pending', 'assigned', 'draft'].includes(r.status));
+         
+         // Select route based on the requested tab (routeType)
+         let targetRoute: any = null;
+         
+         if (routeType === 'urgent') {
+             targetRoute = activeRoute;
+         } else {
+             targetRoute = pendingRoute;
+         }
          
          // Start Point: Rider Location or Default
          const startLat = currentLocation?.lat || DEFAULT_START_LOCATION.lat;
@@ -276,21 +319,34 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
              usedRoute = true;
              setIsAssignedRoute(true);
 
-             // Separate Completed vs Pending
-             const completed = targetRoute.stops.filter((s:any) => s.status === 'completed' || s.shipment?.status === 'delivered');
-             const pending = targetRoute.stops.filter((s:any) => s.status !== 'completed' && s.shipment?.status !== 'delivered');
+             // Deduplicate stops to ensure uniqueness (Shipment ID + Type)
+             // This safeguards against backend data corruption or duplicate entries
+             const uniqueStopsMap = new Map();
+             targetRoute.stops.forEach((s: any) => {
+                 const key = `${s.shipment_id || s.shipmentId}-${s.type}-${s.location}`;
+                 if (!uniqueStopsMap.has(key)) {
+                     uniqueStopsMap.set(key, s);
+                 }
+             });
+             const dedupedStops = Array.from(uniqueStopsMap.values());
+
+             // Separate Completed vs Pending using deduped list
+             const completed = dedupedStops.filter((s:any) => s.status === 'completed' || s.shipment?.status === 'delivered');
+             const pending = dedupedStops.filter((s:any) => s.status !== 'completed' && s.shipment?.status !== 'delivered');
              
              // 1. Map Completed (Keep as is, distance 0 or original)
-             const mappedCompleted = completed.map((s:any, i:number) => ({
-                 id: s.shipment?.id || s.id,
+             const mappedCompleted: RouteStop[] = completed.map((s:any, i:number) => ({
+                 // Critical: Use valid Stop ID, or composite to ensure uniqueness
+                 id: s.id || `${s.shipment?.id || 'unknown'}-${s.type || 'stop'}-${i}`,
+                 shipmentId: s.shipment?.id || s.shipment_id,
                  trackingId: s.shipment?.trackingNumber || '',
                  recipient: s.shipment?.recipientName || 'Customer',
                  address: s.shipment?.address || s.location || '',
                  distance: '0 km', // Already done
                  estimatedTime: '0 min',
-                 status: 'completed',
+                 status: 'completed' as const,
                  type: routeType,
-                 taskType: s.type || ((s.shipment?.status === 'picked_up' || s.shipment?.status === 'in_transit') ? 'delivery' : 'pickup'),
+                 taskType: (s.type || ((s.shipment?.status === 'picked_up' || s.shipment?.status === 'in_transit') ? 'delivery' : 'pickup')) as 'pickup' | 'delivery',
                  eta: 'Completed',
                  stopNumber: i + 1,
                  latitude: parseFloat(s.latitude),
@@ -336,7 +392,7 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
          setCurrentStopIndex(newCurrentIndex);
          setStops(finalStops);
          
-         // Stats
+         // Stats - Pass possible overrides but calculateStats determines validity
          const overrides = (usedRoute && targetRoute) ? {
             totalKm: targetRoute.distance || targetRoute.distance_km ? Number(targetRoute.distance || targetRoute.distance_km) : undefined,
             totalMinutes: targetRoute.duration || targetRoute.duration_min ? Number(targetRoute.duration || targetRoute.duration_min) : undefined
@@ -355,7 +411,7 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
       if (!isRefresh) setLoading(true);
       
       const [routesRes, ordersRes] = await Promise.all([
-          riderApi.getRoutes({ status: 'active,draft,pending' }).catch(err => { console.warn('Routes error', err); return { data: { routes: [] } }; }),
+          riderApi.getRoutes({ status: 'active,draft,pending,assigned' }).catch(err => { console.warn('Routes error', err); return { data: { routes: [] } }; }),
           riderApi.getActiveOrders().catch(err => { console.warn('Orders error', err); return { data: { orders: [] } }; })
       ]);
 
@@ -486,6 +542,29 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
      Linking.openURL(url);
   }, [stops, currentLocation]);
 
+  const handleStartRoute = useCallback(async () => {
+     // Find the pending route ID
+     const pendingRoute = rawRoutes.find((r: any) => ['pending', 'assigned', 'draft'].includes(r.status));
+     if (!pendingRoute) {
+         Alert.alert('Error', 'No Assigned route found.');
+         return;
+     }
+     
+     try {
+         setLoading(true);
+         await riderApi.startRoute(pendingRoute.id);
+         Alert.alert('Success', 'Route started! Switch to Urgent tab to begin.');
+         // Refresh data
+         await fetchRouteData(true);
+         // Automatically switch to urgent
+         setRouteType('urgent');
+     } catch (e: any) {
+         Alert.alert('Error', e.message || 'Failed to start route');
+     } finally {
+         setLoading(false);
+     }
+  }, [rawRoutes, fetchRouteData]);
+
   const urgentCount = useMemo(() => 
       routeSpecs.urgent !== null ? routeSpecs.urgent : filterOrdersByType(activeOrders, 'urgent').length, 
   [activeOrders, filterOrdersByType, routeSpecs.urgent]);
@@ -505,6 +584,7 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
     onRefresh,
     handleStartNavigation,
     handleViewFullRoute,
+    handleStartRoute,
     stats: {
         urgent: urgentCount,
         nextDay: nextDayCount

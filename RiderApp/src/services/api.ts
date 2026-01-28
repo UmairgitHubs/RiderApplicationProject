@@ -556,8 +556,10 @@ export const riderApi = {
   },
 
   // Pickup an order
-  pickupOrder: async (shipmentId: string) => {
-    return api.post<ApiResponse>("/rider/pickup-order", { shipmentId });
+  pickupOrder: async (data: string | { shipmentId: string; scannedCode?: string; condition?: string }) => {
+    // Determine if data is object or string to support legacy calls
+    const payload = typeof data === 'string' ? { shipmentId: data } : data;
+    return api.post<ApiResponse>("/rider/pickup-order", payload);
   },
 
   // Complete delivery
@@ -565,6 +567,9 @@ export const riderApi = {
     shipmentId: string;
     codAmount?: number;
     notes?: string;
+    scannedCode?: string;
+    paymentMethod?: string;
+    signature?: string;
   }) => {
     return api.post<ApiResponse>("/rider/complete-delivery", data);
   },
@@ -584,6 +589,16 @@ export const riderApi = {
   // Toggle online status
   toggleOnlineStatus: async (isOnline: boolean) => {
     return api.post<ApiResponse>("/rider/toggle-online", { isOnline });
+  },
+
+  // Drop off at Hub
+  dropOffAtHub: async (shipmentId: string) => {
+    return api.post<ApiResponse>("/rider/drop-off-hub", { shipmentId });
+  },
+
+  // Start a route
+  startRoute: async (routeId: string) => {
+    return api.post<ApiResponse>("/rider/start-route", { routeId });
   },
 
   // Get earnings

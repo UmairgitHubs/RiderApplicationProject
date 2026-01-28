@@ -21,6 +21,8 @@ const routeSchema = z.object({
     shipmentId: z.string().uuid(),
     type: z.enum(['pickup', 'delivery', 'waypoint']),
     location: z.string().min(1, 'Location is required'),
+    latitude: z.any().optional(),
+    longitude: z.any().optional(),
     order: z.number()
   })).min(1, 'At least one stop is required')
 })
@@ -61,6 +63,7 @@ export default function CreateRouteModal({ isOpen, onClose, routeId }: CreateRou
     watch, 
     control, 
     reset,
+    getValues,
     formState: { errors, isSubmitting } 
   } = useForm<RouteFormValues>({
     resolver: zodResolver(routeSchema),
@@ -106,7 +109,17 @@ export default function CreateRouteModal({ isOpen, onClose, routeId }: CreateRou
     queryFn: () => routesApi.getUnassignedShipments({ hubId: selectedHubId }),
     enabled: isOpen
   })
-  const shipments = (shipmentsData?.data || []) as any[]
+  const rawShipments = (shipmentsData?.data || []) as any[]
+  
+  // Deduplicate shipments to prevent key errors
+  const shipments = React.useMemo(() => {
+    const seen = new Set();
+    return rawShipments.filter((s) => {
+      if (seen.has(s.id)) return false;
+      seen.add(s.id);
+      return true;
+    });
+  }, [rawShipments]);
 
   // Populate form for editing
   useEffect(() => {
@@ -160,22 +173,74 @@ export default function CreateRouteModal({ isOpen, onClose, routeId }: CreateRou
   }
 
   const handleToggleShipment = (shipment: any) => {
-    const existingIndex = selectedStops.findIndex(s => s.shipmentId === shipment.id)
+    // strict check using getValues to avoid closure staleness
+    const currentStops = getValues('stops');
+    const existingIndex = currentStops.findIndex(s => s.shipmentId === shipment.id)
+    
     if (existingIndex > -1) {
-      remove(existingIndex)
+      // Remove all stops for this shipment
+      // We need to re-find indices based on the field array state if mapped, 
+      // but here we can just find them in currentStops and map to indices.
+      // However, 'remove' takes an index relative to the field array.
+      
+      const indicesToRemove = currentStops
+        .map((s, i) => s.shipmentId === shipment.id ? i : -1)
+        .filter(i => i !== -1)
+        .sort((a, b) => b - a)
+
+      indicesToRemove.forEach(i => remove(i))
     } else {
-      append({
-        shipmentId: shipment.id,
-        type: shipment.status === 'pending' ? 'pickup' : 'delivery',
-        location: shipment.status === 'pending' ? shipment.pickup_address : shipment.delivery_address,
-        order: selectedStops.length + 1
-      })
+      const currentHub = hubs.find((h: any) => h.id === selectedHubId);
+      const isFirstLeg = (shipment.status === 'pending' || shipment.status === 'assigned');
+      
+      const nextOrderIndex = currentStops.length + 1;
+
+      if (isFirstLeg) {
+        // Merchant -> Hub
+        append({
+          shipmentId: shipment.id,
+          type: 'pickup',
+          location: shipment.pickup_address || '',
+          latitude: shipment.pickup_latitude,
+          longitude: shipment.pickup_longitude,
+          order: nextOrderIndex
+        });
+        append({
+          shipmentId: shipment.id,
+          type: 'delivery',
+          location: currentHub?.address || currentHub?.name || 'Hub Location',
+          latitude: currentHub?.latitude,
+          longitude: currentHub?.longitude,
+          order: nextOrderIndex + 1
+        });
+      } else if (shipment.status === 'received_at_hub') {
+        // Hub -> Customer
+        append({
+          shipmentId: shipment.id,
+          type: 'pickup',
+          location: currentHub?.address || currentHub?.name || 'Hub Location',
+          latitude: currentHub?.latitude,
+          longitude: currentHub?.longitude,
+          order: nextOrderIndex
+        });
+        append({
+          shipmentId: shipment.id,
+          type: 'delivery',
+          location: shipment.delivery_address || '',
+          latitude: shipment.delivery_latitude,
+          longitude: shipment.delivery_longitude,
+          order: nextOrderIndex + 1
+        });
+      }
     }
   }
 
   const filteredShipments = shipments.filter(s => 
-    s.tracking_number.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    s.recipient_name.toLowerCase().includes(searchTerm.toLowerCase())
+    s.tracking_number?.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    s.recipient_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    s.delivery_address?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    s.pickup_address?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    s.status?.toLowerCase().includes(searchTerm.toLowerCase())
   )
 
   if (!mounted || !isOpen) return null
@@ -385,7 +450,11 @@ export default function CreateRouteModal({ isOpen, onClose, routeId }: CreateRou
                               <div className={`flex items-center gap-1.5 mt-1.5 transition-colors ${isSelected ? 'text-white/70' : 'text-gray-400'}`}>
                                 <MapPin className="w-3 h-3 shrink-0" />
                                 <p className="text-[10px] truncate font-medium">
-                                  {s.status === 'pending' ? s.pickup_address : s.delivery_address}
+                                  {
+                                    (s.status === 'pending' || s.status === 'assigned') ? s.pickup_address : 
+                                    s.status === 'received_at_hub' ? 'At Hub (Ready for Dispatch)' :
+                                    s.delivery_address
+                                  }
                                 </p>
                               </div>
                             </div>

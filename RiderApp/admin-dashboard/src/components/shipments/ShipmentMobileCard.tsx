@@ -4,17 +4,26 @@ import { Shipment } from '@/types/shipment'
 interface ShipmentMobileCardProps {
   shipment: Shipment
   onViewClick: (shipment: Shipment) => void
-  onEditClick: (shipment: Shipment) => void
+  onEditClick?: (shipment: Shipment) => void
 }
 
 export default function ShipmentMobileCard({ shipment, onViewClick, onEditClick }: ShipmentMobileCardProps) {
 
   const getStatusColor = (status: string) => {
     switch (status) {
+      case 'in_transit': 
       case 'Out for Delivery': return 'bg-sky-400 text-white' 
-      case 'At Hub': return 'bg-orange-400 text-white'
+      case 'received_at_hub':
+      case 'At Hub': return 'bg-purple-500 text-white'
+      case 'delivered':
       case 'Delivered': return 'bg-green-500 text-white'
+      case 'pending':
+      case 'assigned':
       case 'Created': return 'bg-gray-500 text-white'
+      case 'picked_up': return 'bg-orange-400 text-white'
+      case 'cancelled':
+      case 'returned':
+      case 'failed': return 'bg-red-500 text-white'
       default: return 'bg-gray-100 text-gray-800'
     }
   }
@@ -87,15 +96,17 @@ export default function ShipmentMobileCard({ shipment, onViewClick, onEditClick 
         >
           <Eye className="w-5 h-5" />
         </button>
-        <button 
-          onClick={(e) => {
-            e.stopPropagation();
-            onEditClick(shipment);
-          }}
-          className="p-2 text-blue-500 hover:bg-blue-50 rounded-md transition-colors"
-        >
-          <Edit2 className="w-5 h-5" />
-        </button>
+        {onEditClick && (
+          <button 
+            onClick={(e) => {
+              e.stopPropagation();
+              onEditClick(shipment);
+            }}
+            className="p-2 text-blue-500 hover:bg-blue-50 rounded-md transition-colors"
+          >
+            <Edit2 className="w-5 h-5" />
+          </button>
+        )}
         {shipment.status === 'Created' && (
             <button className="p-2 text-green-500 hover:bg-green-50 rounded-md transition-colors">
               <Share2 className="w-5 h-5" />
