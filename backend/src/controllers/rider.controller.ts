@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { Prisma } from '@prisma/client';
 import prisma from '../config/database';
 import { logger } from '../utils/logger';
 import { settingsService } from '../services/settings.service';
@@ -948,7 +949,9 @@ export const getCompletedOrders = async (req: Request, res: Response) => {
 export const getEarnings = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user?.id;
-    const { startDate, endDate } = req.query;
+    
+    // We ignore startDate/endDate for the main stats as we want fixed periods (Today, Week, Month)
+    // But we can still support them for the transaction list filtering if needed.
 
     const rider = await prisma.rider.findUnique({
       where: { id: userId },
@@ -964,42 +967,186 @@ export const getEarnings = async (req: Request, res: Response) => {
       });
     }
 
-    const where: any = {
-      user_id: userId,
-      transaction_type: 'credit',
-      transaction_category: 'earnings',
+    const now = new Date();
+    
+    // Today Start
+    const todayStart = new Date(now);
+    todayStart.setHours(0, 0, 0, 0);
+
+    console.log(`[getEarnings] DEBUG: Fetching earnings for RiderID: ${userId}`);
+    console.log(`[getEarnings] DEBUG: Dates - Today: ${todayStart.toISOString()}`);
+
+    // Week Start (Sunday as start)
+    const weekStart = new Date(now);
+    const day = weekStart.getDay();
+    const diff = weekStart.getDate() - day;
+    weekStart.setDate(diff);
+    weekStart.setHours(0, 0, 0, 0);
+
+    // Month Start
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    // DEBUG: Diagnose data availability
+    const statusDistribution = await prisma.shipment.groupBy({
+        by: ['status'],
+        where: { rider_id: userId },
+        _count: { id: true },
+        _sum: { delivery_fee: true }
+    });
+    console.log(`[getEarnings] DEBUG: Shipment Distribution for Rider ${userId}:`, JSON.stringify(statusDistribution, null, 2));
+
+    // Helper to get sum and count from LEDGER (Shipments)
+    const getStats = async (fromDate: Date, periodName: string) => {
+        // We use updated_at as fallback if actual_delivery_time is null
+        const aggregations = await prisma.shipment.aggregate({
+            where: {
+                rider_id: userId,
+                status: { in: ['delivered', 'Delivered', 'completed', 'Completed'] },
+                OR: [
+                    { actual_delivery_time: { gte: fromDate } },
+                    {
+                        actual_delivery_time: null,
+                        updated_at: { gte: fromDate }
+                    }
+                ]
+            },
+            _sum: { delivery_fee: true },
+            _count: { id: true }
+        });
+
+        // Handle Decimal conversion safely
+        const totalAmount = aggregations._sum.delivery_fee
+            ? Number(aggregations._sum.delivery_fee)
+            : 0;
+
+        console.log(`[getEarnings] DEBUG: ${periodName} Stats - Count: ${aggregations._count.id}, Amount: ${totalAmount}`);
+
+        return {
+            amount: totalAmount,
+            count: aggregations._count.id
+        };
     };
 
-    if (startDate || endDate) {
-      where.created_at = {};
-      if (startDate) where.created_at.gte = new Date(startDate as string);
-      if (endDate) where.created_at.lte = new Date(endDate as string);
+    const [todayStats, weekStats, monthStats] = await Promise.all([
+        getStats(todayStart, 'Today'),
+        getStats(weekStart, 'Week'),
+        getStats(monthStart, 'Month'),
+    ]);
+
+
+    // --- SELF-HEALING / RECALCULATION LOGIC ---
+    // Calculates what the stats SHOULD be based on actual Shipment and Transaction records.
+
+    // 1. Calculate Total Lifetime Earnings from Delivered Shipments
+    const calculatedLifetime = await prisma.shipment.aggregate({
+        where: {
+                OR: [
+                    // Case 1: Final Delivery (Last Mile)
+                    { status: { in: ['delivered', 'Delivered', 'completed', 'Completed'] } },
+                    // Case 2: Dropped at Hub (First Mile) - considered completed for the pickup rider
+                    { 
+                        status: 'received_at_hub',
+                        pickup_rider_id: userId // Ensure this rider was the one who did the pickup
+                    }
+                ]
+        },
+        _sum: { delivery_fee: true },
+        _count: { id: true }
+    });
+    const realTotalEarnings = Number(calculatedLifetime._sum.delivery_fee || 0);
+    const realTotalDeliveries = calculatedLifetime._count.id;
+
+    // 2. Calculate Total Withdrawals
+    const totalWithdrawalsObj = await prisma.walletTransaction.aggregate({
+        where: {
+            user_id: userId,
+            transaction_type: 'debit',
+            transaction_category: 'withdrawal'
+        },
+        _sum: { amount: true }
+    });
+    const realTotalWithdrawals = Number(totalWithdrawalsObj._sum.amount || 0);
+
+    // 3. Derive Theoretical Wallet Balance
+    // Balance = (Total Earnings) - (Total Withdrawn)
+    let theoreticalBalance = realTotalEarnings - realTotalWithdrawals;
+
+    // Safety check: if theoretical is 0 but rider has balance, and no shipments found,
+    // it implies legacy data or data loss in shipments. Don't wipe the wallet.
+    if (realTotalEarnings === 0 && Number(rider.wallet_balance) > 0) {
+        console.warn(`[getEarnings] SAFETY: Theoretical balance is 0 but rider has ${rider.wallet_balance}. Preserving legacy balance.`);
+        theoreticalBalance = Number(rider.wallet_balance);
+        // We do NOT update the DB in this ambiguous case
+    } else if (Math.abs(Number(rider.wallet_balance) - theoreticalBalance) > 1) {
+        // Only update if we have meaningful calculated data or if we are sure it should be lower
+        console.log(`[getEarnings] Correcting balance for rider ${userId}. Old: ${rider.wallet_balance}, New: ${theoreticalBalance}`);
+        await prisma.rider.update({
+            where: { id: userId },
+            data: {
+                wallet_balance: theoreticalBalance, // Update wallet
+                total_earnings: realTotalEarnings > 0 ? realTotalEarnings : rider.total_earnings, // Only overwrite earnings if we found some
+                total_deliveries: realTotalDeliveries > 0 ? realTotalDeliveries : rider.total_deliveries
+            }
+        });
     }
 
+    // --- END SELF-HEALING ---
+
+    // Get recent transactions
     const transactions = await prisma.walletTransaction.findMany({
-      where,
+      where: {
+        user_id: userId,
+      },
       orderBy: { created_at: 'desc' },
-      take: 100,
+      take: 20,
     });
 
-    const totalEarnings = transactions.reduce(
-      (sum, t) => sum + Number(t.amount),
-      0
-    );
+    // Calculate "Pending" (Case Insensitive Check)
+    const pendingShipments = await prisma.shipment.findMany({
+        where: {
+            rider_id: userId,
+            status: { in: ['assigned', 'picked_up', 'in_transit', 'Assigned', 'Picked_up', 'In_transit'] }
+        },
+        select: { delivery_fee: true }
+    });
+
+    const pendingAmount = pendingShipments.reduce((sum, s) => {
+        return sum + (s.delivery_fee ? Number(s.delivery_fee) : 0);
+    }, 0);
+
+    // Avg Order - use valid totals
+    const finalTotalEarnings = realTotalEarnings > 0 ? realTotalEarnings : Number(rider.total_earnings || 0);
+    const finalTotalDeliveries = realTotalDeliveries > 0 ? realTotalDeliveries : Number(rider.total_deliveries || 0);
+
+    const avgOrder = finalTotalDeliveries > 0
+        ? (finalTotalEarnings / finalTotalDeliveries)
+        : 0;
 
     res.json({
       success: true,
       data: {
-        walletBalance: rider.wallet_balance,
-        totalEarnings: rider.total_earnings,
-        periodEarnings: totalEarnings,
-        totalDeliveries: rider.total_deliveries,
-        rating: rider.rating,
+        walletBalance: theoreticalBalance,
+        totalEarnings: finalTotalEarnings,
+        pendingAmount: pendingAmount,
+
+        earningsToday: todayStats.amount,
+        deliveriesToday: todayStats.count,
+
+        earningsWeek: weekStats.amount,
+        deliveriesWeek: weekStats.count,
+        
+        earningsMonth: monthStats.amount,
+        deliveriesMonth: monthStats.count,
+        
+        avgPerOrder: avgOrder,
+        
         transactions: transactions.map((t) => ({
           id: t.id,
-          amount: t.amount,
+          type: t.transaction_category === 'withdrawal' ? 'withdrawal' : 'earnings',
+          amount: t.amount ? Number(t.amount) : 0,
           description: t.description,
           createdAt: t.created_at,
+          status: t.status
         })),
       },
     });
@@ -1239,6 +1386,85 @@ export const startRoute = async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       error: { code: 'INTERNAL_ERROR', message: 'Failed to start route.' },
+    });
+  }
+};
+
+// Request Withdrawal
+export const requestWithdrawal = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.id;
+    const { amount, method, accountDetails } = req.body;
+
+    const requestAmount = Number(amount);
+
+    if (isNaN(requestAmount) || requestAmount <= 0) {
+        return res.status(400).json({
+            success: false,
+            error: { code: 'INVALID_AMOUNT', message: 'Invalid withdrawal amount.' }
+        });
+    }
+
+    // 1. Check Rider Balance using a transaction to ensure atomicity
+    const result = await prisma.$transaction(async (tx) => {
+        const rider = await tx.rider.findUnique({
+            where: { id: userId }
+        });
+
+        if (!rider) {
+            throw new Error('RIDER_NOT_FOUND');
+        }
+
+        if (Number(rider.wallet_balance) < requestAmount) {
+            throw new Error('INSUFFICIENT_FUNDS'); 
+        }
+
+        // 2. Create Withdrawal Transaction Record
+        const transaction = await tx.walletTransaction.create({
+            data: {
+                user_id: userId,
+                transaction_type: 'debit',
+                transaction_category: 'withdrawal',
+                amount: requestAmount,
+                balance_after: Number(rider.wallet_balance) - requestAmount,
+                description: `Withdrawal via ${method}`,
+                status: 'pending', // Pending admin approval
+                // metadata column not in schema, ignoring detailed payment info for MVP
+            }
+        });
+
+        // 3. Deduct from Wallet Balance IMMEDIATELY (or reserve it)
+        // Usually we deduct immediately so they can't double withdraw.
+        // If rejected later, we credit it back.
+        await tx.rider.update({
+            where: { id: userId },
+            data: {
+                wallet_balance: { decrement: requestAmount }
+            }
+        });
+
+        return transaction;
+    });
+
+    res.json({
+        success: true,
+        data: { transaction: result },
+        message: 'Withdrawal request submitted successfully.'
+    });
+
+  } catch (error: any) {
+    logger.error('Request withdrawal error:', error);
+    
+    if (error.message === 'INSUFFICIENT_FUNDS') {
+        return res.status(400).json({
+            success: false,
+            error: { code: 'INSUFFICIENT_FUNDS', message: 'Insufficient funds for withdrawal.' }
+        });
+    }
+
+    res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: 'Failed to process withdrawal request.' },
     });
   }
 };

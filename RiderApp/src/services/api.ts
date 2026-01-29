@@ -668,6 +668,11 @@ export const riderApi = {
       : "";
     return api.get<ApiResponse>(`/rider/routes${queryString}`);
   },
+
+  // Withdraw earnings
+  withdrawEarnings: async (data: { amount: number; method: string; accountDetails?: string }) => {
+    return api.post<ApiResponse>("/rider/withdraw", data);
+  },
 };
 
 // Notifications API

@@ -12,7 +12,8 @@ import {
   getRiderRoutes,
   getPerformanceStats,
   dropOffAtHub,
-  startRoute
+  startRoute,
+  requestWithdrawal
 } from '../controllers/rider.controller';
 import { authenticate } from '../middleware/auth.middleware';
 
@@ -33,6 +34,7 @@ router.post('/toggle-online', toggleOnlineStatus);
 router.get('/earnings', getEarnings);
 router.get('/routes', getRiderRoutes);
 router.post('/start-route', startRoute);
+router.post('/withdraw', requestWithdrawal);
 router.get('/performance-stats', getPerformanceStats);
 
 export default router;
