@@ -260,7 +260,7 @@ export default function NavigationScreen() {
   };
 
   // Theme Colors
-  const themeColor = type === 'Pickup' ? '#FF6B00' : '#2962FF';
+  const themeColor = type === 'Pickup' ? '#FF6B00' : '#FF6B00';
 
   if (!hasValidDest) {
       return (

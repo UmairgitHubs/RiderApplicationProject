@@ -140,12 +140,19 @@ export const acceptOrder = async (req: Request, res: Response) => {
     }
 
     // Assign shipment to rider
+    const updateData: any = {
+      rider_id: userId,
+      status: 'assigned',
+    };
+
+    // If picking up from merchant (First Leg), record as pickup rider
+    if (shipment.status === 'pending') {
+       updateData.pickup_rider_id = userId;
+    }
+
     const updatedShipment = await prisma.shipment.update({
       where: { id: shipmentId },
-      data: {
-        rider_id: userId,
-        status: 'assigned',
-      },
+      data: updateData,
     });
 
     // Create tracking entry
@@ -841,42 +848,53 @@ export const getCompletedOrders = async (req: Request, res: Response) => {
 
     const skip = (parseInt(page as string) - 1) * parseInt(limit as string);
 
+    const dateFilter: any = {};
+    if (startDate) dateFilter.gte = new Date(startDate as string);
+    if (endDate) dateFilter.lte = new Date(endDate as string);
+
+    const hasDateFilter = startDate || endDate;
+
     const where: any = {
-      status: 'delivered',
       OR: [
-        { rider_id: userId },
-        { 
-          route_stops: { 
-            some: { 
-              route: { 
-                rider_id: userId 
-              } 
-            } 
-          } 
+        // 1. Fully Delivered (Last Mile by this rider OR First Mile by this rider)
+        {
+          status: 'delivered',
+          OR: [
+             { rider_id: userId }, 
+             { pickup_rider_id: userId }
+          ],
+          ...(hasDateFilter ? { actual_delivery_time: dateFilter } : {})
+        },
+        // 2. Dropped at Hub (First Mile completed by this rider)
+        {
+          status: 'received_at_hub',
+          pickup_rider_id: userId,
+          ...(hasDateFilter ? { updated_at: dateFilter } : {})
         }
       ]
     };
-
-    if (startDate || endDate) {
-      where.actual_delivery_time = {};
-      if (startDate) where.actual_delivery_time.gte = new Date(startDate as string);
-      if (endDate) where.actual_delivery_time.lte = new Date(endDate as string);
-    }
 
     const [shipments, total] = await Promise.all([
       prisma.shipment.findMany({
         where,
         skip,
         take: parseInt(limit as string),
-        orderBy: { actual_delivery_time: 'desc' },
+        orderBy: { updated_at: 'desc' },
         include: {
           merchant: {
             select: {
               id: true,
               full_name: true,
               phone: true,
+              merchant: { select: { business_name: true } }
             },
           },
+          hub: {
+             select: {
+                 name: true,
+                 address: true
+             }
+          }
         },
       }),
       prisma.shipment.count({
@@ -893,14 +911,18 @@ export const getCompletedOrders = async (req: Request, res: Response) => {
           status: s.status,
           recipientName: s.recipient_name,
           recipientPhone: s.recipient_phone,
-          deliveryAddress: s.delivery_address,
+          deliveryAddress: s.status === 'received_at_hub' ? (s.hub?.address || s.hub?.name || s.delivery_address) : s.delivery_address,
+          hub: s.hub,
           deliveryFee: s.delivery_fee,
           codAmount: s.cod_amount,
           distanceKm: s.distance_km,
           scheduledDeliveryTime: s.scheduled_delivery_time,
           actualDeliveryTime: s.actual_delivery_time,
           createdAt: s.created_at,
-          merchant: s.merchant,
+          merchant: {
+            ...s.merchant,
+             business_name: (s.merchant as any)?.merchant?.business_name
+          },
         })),
         pagination: {
           page: parseInt(page as string),

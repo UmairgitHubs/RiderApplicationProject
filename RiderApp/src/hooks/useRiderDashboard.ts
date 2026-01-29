@@ -81,8 +81,8 @@ export const useRiderDashboard = () => {
       const pendingRoute = routes.find((r: any) => ['pending', 'assigned', 'draft'].includes(r.status));
 
       setRouteCounts({
-          urgent: activeRoute?.stops?.filter((s:any) => s.status !== 'completed' && s.shipment?.status !== 'delivered').length ?? null,
-          nextDay: pendingRoute?.stops?.filter((s:any) => s.status !== 'completed' && s.shipment?.status !== 'delivered').length ?? null
+          urgent: activeRoute?.stops?.filter((s:any) => s.status !== 'completed' && s.shipment?.status !== 'delivered' && s.shipment?.status !== 'received_at_hub').length ?? null,
+          nextDay: pendingRoute?.stops?.filter((s:any) => s.status !== 'completed' && s.shipment?.status !== 'delivered' && s.shipment?.status !== 'received_at_hub').length ?? null
       });
 
       // Process Active Orders - Derived STRICTLY from Routes
@@ -93,7 +93,7 @@ export const useRiderDashboard = () => {
       // Helper to map stops to Delivery objects
       const mapStopsToDeliveries = (stops: any[], type: 'urgent' | 'nextDay') => {
           return stops
-             .filter((s: any) => s.shipment && s.status !== 'completed' && s.shipment.status !== 'delivered') // Filter out completed
+             .filter((s: any) => s.shipment && s.status !== 'completed' && s.shipment.status !== 'delivered' && s.shipment.status !== 'received_at_hub') // Filter out completed
              .map((stop: any) => {
                  const shipment = stop.shipment;
                  const distanceKm = shipment.distanceKm;

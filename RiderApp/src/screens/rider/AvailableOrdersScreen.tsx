@@ -98,18 +98,18 @@ export default function AvailableOrdersScreen() {
           const mappedDelivered = response.data.shipments.map((s: any) => ({
               id: s.id,
               trackingId: s.trackingNumber,
-              status: s.status,
+              status: s.status, // Keep raw status
               recipientName: s.recipientName,
               deliveryAddress: s.deliveryAddress,
               deliveryFee: parseFloat(s.deliveryFee || 0),
               codAmount: parseFloat(s.codAmount || 0),
               scheduledDeliveryTime: s.scheduledDeliveryTime,
               actualDeliveryTime: s.actualDeliveryTime,
-              merchantName: s.merchant?.full_name || 'Unknown Merchant'
+              merchantName: s.merchant?.business_name || s.merchant?.full_name || 'Merchant' // Prioritize Business Name
           }));
           setDeliveredOrders(mappedDelivered);
       } else {
-        // Handle empty success if needed, though default is okay
+        // Handle empty
       }
     } catch (error) {
       console.error('Failed to fetch orders', error);
@@ -127,12 +127,6 @@ export default function AvailableOrdersScreen() {
   );
 
   // Trigger fetch when filter changes
-  // Note: Since fetchOrders depends on selectedFilter, useFocusEffect technically handles it 
-  // if the screen is focused, but useEffect is safer for non-focus updates logic.
-  // However, useFocusEffect(useCallback(..., [fetchOrders])) already covers it because
-  // fetchOrders changes when selectedFilter changes.
-  // We'll leave the pattern primarily as useFocusEffect but ensure the logic inside is solid.
-  // To be absolutely safe and conventional:
   useEffect(() => {
       fetchOrders();
   }, [selectedFilter]);
@@ -140,6 +134,24 @@ export default function AvailableOrdersScreen() {
   const handleRefresh = () => {
     setRefreshing(true);
     fetchOrders();
+  };
+
+  const getStatusColor = (status: string) => {
+      switch(status) {
+          case 'delivered': return colors.success;
+          case 'received_at_hub': return colors.primary; // Or a specific 'info' color
+          case 'cancelled': return colors.error;
+          default: return colors.textLight;
+      }
+  };
+
+  const getStatusLabel = (status: string) => {
+      switch(status) {
+          case 'delivered': return 'Delivered';
+          case 'received_at_hub': return 'Hub Drop-off';
+          case 'cancelled': return 'Cancelled';
+          default: return status.replace(/_/g, ' ');
+      }
   };
 
   return (
@@ -210,8 +222,8 @@ export default function AvailableOrdersScreen() {
                 deliveredOrders.map((order) => (
                     <View key={order.id} style={styles.orderCard}>
                         <View style={styles.orderHeader}>
-                            <View style={[styles.statusBadge, { backgroundColor: colors.success }]}>
-                                <Text style={styles.statusText}>Delivered</Text>
+                            <View style={[styles.statusBadge, { backgroundColor: getStatusColor(order.status) }]}>
+                                <Text style={styles.statusText}>{getStatusLabel(order.status)}</Text>
                             </View>
                             <Text style={{ color: colors.textLight, fontSize: 12 }}>
                                 {order.actualDeliveryTime ? new Date(order.actualDeliveryTime).toLocaleDateString() : ''}

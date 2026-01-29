@@ -96,7 +96,7 @@ export const useRiderOrderDetails = (orderId: string) => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['order', orderId] });
       queryClient.invalidateQueries({ queryKey: ['activeOrders'] });
-      Alert.alert('Success', 'Order dropped off at Hub', [
+      Alert.alert('Mission Complete', 'Package successfully secured at Hub. Great work!', [
         { text: 'OK', onPress: () => navigation.goBack() }
       ]);
     },
