@@ -31,6 +31,7 @@ export default function RiderOrderDetailsScreen({ navigation, route }: any) {
     refetch
   } = useRiderOrderDetails(orderId);
 
+
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
@@ -62,7 +63,7 @@ export default function RiderOrderDetailsScreen({ navigation, route }: any) {
     earnings: Number(order.delivery_fee),
     merchantName: order.merchant?.business_name || order.merchant?.full_name || 'Merchant',
     merchantPhone: order.merchant?.phone || '',
-    pickupAddress: isHubPickup ? (order.hub?.address || order.hub?.name || 'Hub') : (order.pickup_address || order.merchant.address || order.merchant?.address),
+    pickupAddress: isHubPickup ? (order.hub?.address || order.hub?.name || 'Hub') : (order.merchant.address || order.merchant?.address),
     deliveryAddress: isDeliveringToHub ? (order.hub?.address || order.hub?.name || 'Hub') : order.delivery_address,
     recipientName: isDeliveringToHub ? (order.hub?.name || 'Hub Center') : order.recipient_name,
     recipientPhone: isDeliveringToHub ? '' : order.recipient_phone,

@@ -58,75 +58,46 @@ export default function FranchiseShipmentScreen({ navigation, route }: any) {
     fetchPickupAddress();
   }, []);
 
+  /* Fetches pickup address from profile */
   const fetchPickupAddress = async () => {
     try {
       setLoadingPickup(true);
-      // Try to get user profile
+      
       const user = await authApi.getStoredUser();
       
       try {
         const profileResponse = await api.get('/profile') as any;
-        if (profileResponse.success && profileResponse.data) {
-          const profile = profileResponse.data;
+        
+        if (profileResponse.success && profileResponse.data?.profile) {
+          const profile = profileResponse.data.profile;
           
           setPickupAddress({
-            businessName: profile.businessName || profile.fullName || 'My Business',
+            businessName: profile.businessName || profile.fullName || user?.fullName || '',
             phone: profile.phone || user?.phone || '',
-            address: profile.businessAddress || profile.address || '123 Broadway, New York, NY 10001',
+            address: profile.businessAddress || profile.address || '',
             city: profile.city || '',
           });
 
-         // Priority 1: Merchant Profile City
-          if (profile.city) {
-               setPickupAddress(prev => ({ ...prev, city: profile.city }));
-          } 
-          // Priority 2: Default Address
-          else {
-              try {
-                const addressesResponse = await api.get('/profile/addresses') as any;
-                if (addressesResponse.success && addressesResponse.data?.length > 0) {
-                  const defaultAddress = addressesResponse.data.find((addr: any) => addr.isDefault) || addressesResponse.data[0];
-                  
-                  setPickupAddress(prev => ({
-                      ...prev,
-                      address: defaultAddress 
-                      ? `${defaultAddress.addressLine1 || ''}${defaultAddress.addressLine2 ? ', ' + defaultAddress.addressLine2 : ''}, ${defaultAddress.city || ''}, ${defaultAddress.state || ''} ${defaultAddress.postalCode || ''}`.trim()
-                      : prev.address,
-                      city: defaultAddress.city || prev.city || ''
-                  }));
-                  
-                  return;
-                }
-              } catch (e) {
-                console.log('Could not fetch addresses, using profile data');
-              }
-          }
         } else {
-             // Fallback to default
+             // Fallback to local storage user if profile fetch fails
             setPickupAddress({
-                businessName: user?.fullName || 'My Business',
-                phone: user?.phone || '+1 (555) 123-4567',
-                address: '123 Broadway, New York, NY 10001',
+                businessName: user?.fullName || '',
+                phone: user?.phone || '',
+                address: '',
                 city: '',
             });
         }
       } catch (error) {
-        console.log('Could not fetch profile, using defaults');
+        console.log('Could not fetch profile, using local defaults');
         setPickupAddress({
-          businessName: user?.fullName || 'Tech Store NYC',
-          phone: user?.phone || '+1 (555) 123-4567',
-          address: '123 Broadway, New York, NY 10001',
+          businessName: user?.fullName || '',
+          phone: user?.phone || '',
+          address: '',
           city: '',
         });
       }
     } catch (error) {
       console.error('Error fetching pickup address:', error);
-      setPickupAddress({
-        businessName: 'Tech Store NYC',
-        phone: '+1 (555) 123-4567',
-        address: '123 Broadway, New York, NY 10001',
-        city: '',
-      });
     } finally {
       setLoadingPickup(false);
     }

@@ -1016,42 +1016,51 @@ export const getEarnings = async (req: Request, res: Response) => {
 
     const now = new Date();
     
-    // Today Start
+    // Today Start (Calendar Day)
     const todayStart = new Date(now);
     todayStart.setHours(0, 0, 0, 0);
 
     console.log(`[getEarnings] DEBUG: Fetching earnings for RiderID: ${userId}`);
     console.log(`[getEarnings] DEBUG: Dates - Today: ${todayStart.toISOString()}`);
 
-    // Week Start (Sunday as start)
+    // Week Start -> Last 7 Days (Rolling Window to prevent empty stats on Sunday)
     const weekStart = new Date(now);
-    const day = weekStart.getDay();
-    const diff = weekStart.getDate() - day;
-    weekStart.setDate(diff);
-    weekStart.setHours(0, 0, 0, 0);
+    weekStart.setDate(now.getDate() - 7);
 
-    // Month Start
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    // Month Start -> Last 30 Days (Rolling Window to prevent empty stats on 1st of month)
+    const monthStart = new Date(now);
+    monthStart.setDate(now.getDate() - 30);
 
-    // Helper to get sum and count from WALLET TRANSACTIONS (Ledger)
-    // This is the source of truth for earnings provided by the system.
+    // Helper to get sum and count from SHIPMENTS (Source of Truth)
     const getStats = async (fromDate: Date, periodName: string) => {
         
-        const stats = await prisma.walletTransaction.aggregate({
+        // 1. Last Mile Earnings (Deliveries)
+        const lastMile = await prisma.shipment.aggregate({
             where: {
-                user_id: userId,
-                transaction_type: 'credit',
-                transaction_category: 'earnings', // Ensure we only count job earnings
-                created_at: { gte: fromDate }
+                rider_id: userId,
+                status: { in: ['delivered', 'Delivered', 'completed', 'Completed'] },
+                updated_at: { gte: fromDate } // Changed from actual_delivery_time to updated_at for reliability
             },
-            _sum: { amount: true },
+            _sum: { delivery_fee: true },
             _count: { id: true }
         });
 
-        const totalAmount = Number(stats._sum.amount || 0);
-        const totalCount = stats._count.id;
+        // 2. First Mile Earnings (Pickups)
+        const firstMile = await prisma.shipment.aggregate({
+            where: {
+                pickup_rider_id: userId,
+                status: { in: ['received_at_hub', 'Received_at_hub', 'delivered', 'Delivered', 'completed', 'Completed'] },
+                updated_at: { gte: fromDate }
+            },
+            // @ts-ignore
+            _sum: { pickup_fee: true },
+            _count: { id: true }
+        });
+
+        const totalAmount = Number(lastMile._sum.delivery_fee || 0) + Number(firstMile._sum.pickup_fee || 0);
+        const totalCount = lastMile._count.id + firstMile._count.id;
             
-        console.log(`[getEarnings] DEBUG: ${periodName} Stats - Amount: ${totalAmount}, Count: ${totalCount}`);
+        console.log(`[getEarnings] DEBUG: ${periodName} Stats (${fromDate.toISOString()}) - Amount: ${totalAmount}, Count: ${totalCount}`);
 
         return {
             amount: totalAmount,
@@ -1241,7 +1250,12 @@ export const getRiderRoutes = async (req: Request, res: Response) => {
                 recipient_name: true,
                 recipient_phone: true,
                 package_weight: true,
-                estimated_delivery_time: true
+                estimated_delivery_time: true,
+                pickup_latitude: true,
+                pickup_longitude: true,
+                delivery_latitude: true,
+                delivery_longitude: true,
+                distance_km: true
               }
             }
           }

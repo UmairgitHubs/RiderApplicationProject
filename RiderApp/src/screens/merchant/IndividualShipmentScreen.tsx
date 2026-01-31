@@ -75,59 +75,39 @@ export default function IndividualShipmentScreen({ navigation, route }: any) {
     try {
       setLoadingPickup(true);
       const user = await authApi.getStoredUser();
-      // Alert.alert("User",JSON.stringify(user));
-     
       
       try {
         const profileResponse = await api.get('/profile') as any;
-        if (profileResponse.success && profileResponse.data) {
-          const profile = profileResponse.data;
+        if (profileResponse.success && profileResponse.data?.profile) {
+          const profile = profileResponse.data.profile;
           
           setPickupAddress({
-            label: profile.businessName || profile.fullName || 'Your Location',
+            label: profile.businessName || profile.fullName || user?.fullName || '',
             phone: profile.phone || user?.phone || '',
-            address: profile.businessAddress || profile.address || 'Current registered address',
+            address: profile.businessAddress || profile.address || '',
           });
 
-          // Priority 1: Merchant Profile City (We just added this to backend)
           if (profile.city) {
               setPickupCity(profile.city);
-          } 
-          // Priority 2: Try default address if city is still missing
-          else {
-              try {
-                const addressesResponse = await api.get('/profile/addresses') as any;
-                if (addressesResponse.success && addressesResponse.data?.length > 0) {
-                  const defaultAddress = addressesResponse.data.find((addr: any) => addr.isDefault) || addressesResponse.data[0];
-                   if (defaultAddress.city) setPickupCity(defaultAddress.city);
-                }
-              } catch (e) {
-                console.log('Could not fetch addresses');
-              }
           }
         } else {
              // Fallback
              setPickupAddress({
-                label:user?.fullName || 'Your Location',
-                phone: user?.phone || '+1 (555) 123-4567',
-                address: 'Current registered address',
+                label: user?.fullName || '',
+                phone: user?.phone || '',
+                address: '',
               });
         }
       } catch (error) {
         console.log('Could not fetch profile, using defaults');
         setPickupAddress({
-          label: 'Your Location',
-          phone: user?.phone || '+1 (555) 123-4567',
-          address: 'Current registered address',
+           label: user?.fullName || '',
+           phone: user?.phone || '',
+           address: '',
         });
       }
     } catch (error) {
       console.error('Error fetching pickup address:', error);
-      setPickupAddress({
-        label: 'Your Location',
-        phone: '+1 (555) 123-4567',
-        address: 'Current registered address',
-      });
     } finally {
       setLoadingPickup(false);
     }

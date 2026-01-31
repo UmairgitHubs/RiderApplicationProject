@@ -67,6 +67,26 @@ export default function CreateShipmentScreen({ navigation, route }: any) {
     },
   ]);
 
+  // Prefill from profile
+  React.useEffect(() => {
+    const fetchProfile = async () => {
+        try {
+            const { api } = await import('../../services/api');
+            const profileResponse: any = await api.get('/profile');
+            if (profileResponse.success && profileResponse.data?.profile) {
+                const p = profileResponse.data.profile;
+                const addr = p.businessAddress || p.address || '';
+                const city = p.city || '';
+                if (addr) setPickupAddress(addr);
+                if (city) setPickupCity(city);
+            }
+        } catch (e) {
+            console.error(e);
+        }
+    };
+    fetchProfile();
+  }, []);
+
 
   // Calculate fees
   const estimatedTotal = useMemo(() => {

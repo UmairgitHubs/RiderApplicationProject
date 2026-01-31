@@ -8,6 +8,7 @@ import {
   Platform,
   ActivityIndicator,
   RefreshControl,
+  Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -59,7 +60,6 @@ export default function RoutePlanningScreen() {
   }
 
   const currentStop = stops[currentStopIndex] || stops[0];
-
   return (
     <View style={styles.container}>
       {/* Header */}
@@ -334,7 +334,7 @@ export default function RoutePlanningScreen() {
                     <Text style={styles.stopTrackingId}>{stop.trackingId}</Text>
                     <View style={styles.stopAddressRow}>
                       <Ionicons name="location-outline" size={14} color={colors.textLight} />
-                      <Text style={styles.stopRecipient}>{stop.recipient}</Text>
+                      <Text style={styles.stopRecipient} numberOfLines={1}>{stop.address}</Text>
                       <Ionicons name="chevron-forward" size={14} color={colors.textLight} />
                     </View>
                     {index < stops.length - 1 && (

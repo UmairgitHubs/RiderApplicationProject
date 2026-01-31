@@ -537,7 +537,7 @@ export default function ShipmentDetailsModal({ shipment, isOpen, onClose, onEdit
                     <p className="font-medium text-gray-900">
                       {d.hub ? 
                         (typeof d.hub === 'object' ? d.hub.name : d.hub) 
-                        : (shipment.hub ? (typeof shipment.hub === 'object' ? shipment.hub.name : shipment.hub) : 'Unassigned')
+                        : (shipment.hub ? (typeof shipment.hub === 'object' ? (shipment.hub as any).name : shipment.hub) : 'Unassigned')
                       }
                     </p>
                 </div>

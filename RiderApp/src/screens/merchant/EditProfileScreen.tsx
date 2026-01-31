@@ -27,6 +27,7 @@ export default function EditProfileScreen() {
   const [phone, setPhone] = useState('');
   const [businessName, setBusinessName] = useState('');
   const [businessAddress, setBusinessAddress] = useState('');
+  const [city, setCity] = useState('');
 
   useFocusEffect(
     React.useCallback(() => {
@@ -47,6 +48,7 @@ export default function EditProfileScreen() {
         // Business fields from merchant object
         setBusinessName(profile.businessName || '');
         setBusinessAddress(profile.businessAddress || profile.address || '');
+        setCity(profile.city || '');
       }
     } catch (error: any) {
       console.error('Error fetching profile:', error);
@@ -71,6 +73,9 @@ export default function EditProfileScreen() {
       }
       if (businessAddress) {
         updateData.address = businessAddress;
+      }
+      if (city) {
+        updateData.city = city;
       }
       
       console.log('Updating profile with:', updateData);
@@ -222,6 +227,17 @@ export default function EditProfileScreen() {
             value={businessAddress}
             onChangeText={setBusinessAddress}
             multiline
+          />
+        </View>
+
+        <View style={styles.inputContainer}>
+          <Ionicons name="map-outline" size={20} color={colors.textLight} style={styles.inputIcon} />
+          <TextInput
+            style={styles.input}
+            placeholder="City"
+            placeholderTextColor={colors.textLight}
+            value={city}
+            onChangeText={setCity}
           />
         </View>
 

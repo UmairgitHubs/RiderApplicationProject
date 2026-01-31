@@ -69,9 +69,12 @@ API route definitions mapping URLs to controllers.
 Business logic and external service integrations.
 - `activity.service.ts`: User activity logging.
 - `email.service.ts`: Email sending (e.g., SMTP, SendGrid).
+- `firebase.service.ts`: Firebase integration.
 - `notification.service.ts`: In-app or push notifications.
+- `route.service.ts`: Route optimization and management.
 - `settings.service.ts`: Management of application settings.
-- `sms.service.ts`: SMS sending (e.g., Twilio).
+- `sms.service.ts`: SMS sending.
+- `twilio.service.ts`: Twilio integration.
 
 ### 5. **Middleware (`middleware/`)**
 - `admin.middleware.ts`: Checks for admin role.

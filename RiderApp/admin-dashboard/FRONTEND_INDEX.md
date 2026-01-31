@@ -38,11 +38,18 @@ Modularized by feature domain.
   - `AgentStats.tsx`, `AgentStatsCard.tsx`: Metrics display.
   - `AddAgentModal.tsx`, `AgentDetailsModal.tsx`: Management modals.
   - `AgentMobileCard.tsx`: Mobile view adaptation.
+- **`auth/`**:
+  - `LoginForm.tsx`.
 - **`cms/`**:
   - `CMSTable.tsx`: List of CMS content.
   - `CMSTabs.tsx`: Tab navigation for CMS sections.
   - `CMSModal.tsx`, `CMSViewModal.tsx`: Create/Edit/View modals.
   - `CMSMobileCard.tsx`, `CMSStatsCard.tsx`: Mobile and stats views.
+- **`dashboard/`**:
+  - `SummaryCards.tsx`, `RecentActivity.tsx`.
+  - `ShipmentStatusChart.tsx`, `OrderDetailsChart.tsx`.
+  - `DashboardCalendar.tsx`, `UpcomingEvents.tsx`.
+  - `HubPerformanceChart.tsx`.
 - **`hubs/`**:
   - `HubCard.tsx`: Grid view item.
   - `AddHubModal.tsx`, `EditHubModal.tsx`, `DeleteHubModal.tsx`.

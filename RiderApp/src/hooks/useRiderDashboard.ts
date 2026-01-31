@@ -104,13 +104,21 @@ export const useRiderDashboard = () => {
                  // If stop is active, it's effectively 'inTransit' for the rider
                  if (stop.status === 'active') dStatus = 'inTransit';
 
+                 // Determine address based on stop type or implied task
+                 const isPickup = stop.type === 'pickup' || shipment.status === 'assigned' || shipment.status === 'pending';
+                 const address = isPickup 
+                    ? (shipment.pickupAddress || shipment.pickup_address || stop.location)
+                    : (shipment.deliveryAddress || shipment.delivery_address || shipment.address || stop.location);
+
+                 const fee = shipment.deliveryFee || shipment.delivery_fee || 0;
+
                  return {
                      id: shipment.id,
-                     trackingId: shipment.trackingNumber,
-                     recipient: shipment.recipientName || 'Customer',
-                     address: shipment.address,
+                     trackingId: shipment.trackingNumber || shipment.tracking_number,
+                     recipient: shipment.recipientName || shipment.recipient_name || 'Customer',
+                     address: address || 'Unknown Address',
                      distance: distance,
-                     earnings: 0, 
+                     earnings: Number(fee), 
                      type: type,
                      status: dStatus,
                      eta: stop.estimatedTime || 'N/A',
@@ -122,7 +130,15 @@ export const useRiderDashboard = () => {
       routeDerivedDeliveries.push(...mapStopsToDeliveries(urgentStops, 'urgent'));
       routeDerivedDeliveries.push(...mapStopsToDeliveries(nextDayStops, 'nextDay'));
       
-      const mappedDeliveries = routeDerivedDeliveries;
+      // Deduplicate by ID to ensure we only show the next actionable stop for each shipment
+      const uniqueDeliveriesMap = new Map();
+      routeDerivedDeliveries.forEach(d => {
+          if (!uniqueDeliveriesMap.has(d.id)) {
+              uniqueDeliveriesMap.set(d.id, d);
+          }
+      });
+      
+      const mappedDeliveries = Array.from(uniqueDeliveriesMap.values());
 
       // Process Completed Orders
       const completedOrders = completedResponse?.data?.shipments || [];

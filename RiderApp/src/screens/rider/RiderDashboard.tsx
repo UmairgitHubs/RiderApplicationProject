@@ -126,17 +126,17 @@ export default function RiderDashboard() {
         <View style={styles.summaryCards}>
           <View style={styles.summaryCard}>
             <Ionicons name="time-outline" size={24} color={colors.textWhite} />
-            <Text style={styles.summaryNumber}>{stats.active}</Text>
+            <Text style={styles.summaryNumber} numberOfLines={1} adjustsFontSizeToFit>{stats.active}</Text>
             <Text style={styles.summaryLabel}>{t('dashboard.active', 'Active')}</Text>
           </View>
           <View style={styles.summaryCard}>
             <Ionicons name="cash-outline" size={24} color={colors.textWhite} />
-            <Text style={styles.summaryNumber}>${stats.todayEarnings.toFixed(1)}</Text>
+            <Text style={styles.summaryNumber} numberOfLines={1} adjustsFontSizeToFit>${stats.todayEarnings.toFixed(1)}</Text>
             <Text style={styles.summaryLabel}>{t('dashboard.today', 'Today')}</Text>
           </View>
           <View style={styles.summaryCard}>
             <Ionicons name="stats-chart-outline" size={24} color={colors.textWhite} />
-            <Text style={styles.summaryNumber}>${stats.totalEarnings.toFixed(1)}</Text>
+            <Text style={styles.summaryNumber} numberOfLines={1} adjustsFontSizeToFit>${stats.totalEarnings.toFixed(1)}</Text>
             <Text style={styles.summaryLabel}>{t('dashboard.total', 'Total')}</Text>
           </View>
         </View>
@@ -256,85 +256,42 @@ export default function RiderDashboard() {
           ) : (
             filteredDeliveries.map((delivery) => {
               const statusBadge = getStatusBadge(delivery.status);
-              const typeBadge = getTypeBadge(delivery.type);
-              const isActive = ['inTransit', 'pickedUp'].includes(delivery.status);
+              const isUrgent = delivery.type === 'urgent';
 
               return (
                 <TouchableOpacity 
                   key={delivery.id} 
-                  style={styles.deliveryCard}
+                  style={styles.deliveryCardNew}
                   onPress={() => navigation.navigate('RoutePlanning', { routeType: delivery.type })}
                 >
-                  {isActive && (
-                    <View style={styles.deliveryActiveIndicator}>
-                      <Ionicons name="paper-plane" size={16} color={colors.success} />
+                  <View style={styles.cardTopSection}>
+                    <View style={styles.cardInfoCol}>
+                      <Text style={styles.cardTrackingText}>{delivery.trackingId}</Text>
+                      <Text style={styles.cardRecipientText}>{delivery.recipient}</Text>
                     </View>
-                  )}
-                  <View style={styles.deliveryHeader}>
-                    <Text 
-                      style={styles.trackingId} 
-                      numberOfLines={1} 
-                      ellipsizeMode="middle"
-                    >
-                      {delivery.trackingId}
-                    </Text>
-                    <View style={styles.badgeContainer}>
-                      <View style={[styles.badge, { backgroundColor: typeBadge.color }]}>
-                        <Text style={styles.badgeText}>{typeBadge.label}</Text>
-                      </View>
-                      <View style={[styles.badge, { backgroundColor: statusBadge.color }]}>
-                        <Text style={styles.badgeText}>{statusBadge.label}</Text>
+                    <View style={styles.cardBadgesCol}>
+                      {isUrgent && (
+                        <View style={styles.urgentBadgeNew}>
+                          <Ionicons name="flash" size={10} color="#FFF" style={{marginRight:3}} />
+                          <Text style={styles.urgentBadgeTextNew}>URGENT</Text>
+                        </View>
+                      )}
+                      <View style={[styles.statusBadgeNew, { backgroundColor: '#FFF9C4' }]}> 
+                         {/* Using fixed yellow for 'Pending' style matching image, or dynamic if needed */}
+                         <Text style={[styles.statusBadgeTextNew, { color: '#FBC02D' }]}>{statusBadge.label}</Text>
                       </View>
                     </View>
                   </View>
 
-                  {isActive ? (
-                    <>
-                      <Text style={styles.recipientActive}>{t('common.to', 'To')}: {delivery.recipient}</Text>
-                      {delivery.eta && (
-                        <View style={styles.etaContainer}>
-                          <Ionicons name="time-outline" size={14} color={colors.textLight} />
-                          <Text style={styles.etaText}>{delivery.eta}</Text>
-                        </View>
-                      )}
-                      <View style={styles.distanceContainerInline}>
-                        <Text style={styles.distance}>{delivery.distance}</Text>
-                      </View>
-                      <View style={styles.addressContainer}>
-                        <Ionicons name="location-outline" size={16} color={colors.textLight} />
-                        <Text style={styles.address}>{delivery.address}</Text>
-                      </View>
-                      <View style={styles.actionButtonsContainer}>
-                        <TouchableOpacity style={styles.actionButton}>
-                          <Ionicons name="call" size={18} color={colors.success} />
-                        </TouchableOpacity>
-                        <TouchableOpacity style={styles.actionButton}>
-                          <Ionicons name="chatbubble-outline" size={18} color={colors.info} />
-                        </TouchableOpacity>
-                      </View>
-                      <View style={styles.earningsContainer}>
-                        <Text style={styles.earningsLabel}>
-                          {t('common.earnings', 'Earnings')}: <Text style={styles.earningsAmount}>${delivery.earnings.toFixed(2)}</Text>
-                        </Text>
-                      </View>
-                    </>
-                  ) : (
-                    <>
-                      <Text style={styles.recipient}>{delivery.recipient}</Text>
-                      <View style={styles.addressContainer}>
-                        <Ionicons name="location-outline" size={16} color={colors.textLight} />
-                        <Text style={styles.address}>{delivery.address}</Text>
-                      </View>
-                      <View style={styles.deliveryFooter}>
-                        <View style={styles.distanceContainer}>
-                          <Text style={styles.distance}>{delivery.distance}</Text>
-                        </View>
-                      </View>
-                      <View style={styles.earningsContainer}>
-                        <Text style={styles.earningsAmount}>${delivery.earnings.toFixed(2)}</Text>
-                      </View>
-                    </>
-                  )}
+                  <View style={styles.addressBoxNew}>
+                    <Ionicons name="location-outline" size={18} color={colors.textLight} style={{marginTop: 2}} />
+                    <Text style={styles.addressTextNew}>{delivery.address}</Text>
+                  </View>
+
+                  <View style={styles.cardFooterNew}>
+                    <Text style={styles.distTextNew}>{delivery.distance}</Text>
+                    <Text style={styles.priceTextNew}>${delivery.earnings.toFixed(2)}</Text>
+                  </View>
                 </TouchableOpacity>
               );
             })
@@ -818,5 +775,111 @@ const styles = StyleSheet.create({
     color: colors.textLight,
     marginTop: spacing.xs,
     textAlign: 'center',
+  },
+  // --- New Card Design Styles ---
+  deliveryCardNew: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24, // More rounded for modern feel
+    padding: 20,
+    marginBottom: 16,
+    // Premium soft shadow
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.06,
+    shadowRadius: 16,
+    elevation: 4,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
+  },
+  cardTopSection: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 16,
+  },
+  cardInfoCol: {
+    flex: 1,
+    marginRight: 12,
+    justifyContent: 'center',
+  },
+  cardTrackingText: {
+    fontSize: 13,
+    color: '#64748B', // Slate 500
+    fontWeight: '500',
+    marginBottom: 6,
+    letterSpacing: 0.2,
+  },
+  cardRecipientText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1E293B', // Slate 800
+    letterSpacing: -0.3,
+  },
+  cardBadgesCol: {
+    alignItems: 'flex-end',
+    gap: 6,
+  },
+  urgentBadgeNew: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FF4500', // Orange Red
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
+    shadowColor: '#FF4500',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  urgentBadgeTextNew: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  statusBadgeNew: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
+  },
+  statusBadgeTextNew: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  addressBoxNew: {
+    backgroundColor: '#F8FAFC', // Very light blue/grey
+    borderRadius: 16,
+    padding: 14,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
+  },
+  addressTextNew: {
+    flex: 1,
+    fontSize: 14,
+    color: '#475569', // Slate 600
+    lineHeight: 21,
+    marginLeft: 8,
+    fontWeight: '400',
+  },
+  cardFooterNew: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: 4,
+  },
+  distTextNew: {
+    fontSize: 15,
+    color: '#64748B',
+    fontWeight: '500',
+  },
+  priceTextNew: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#10B981', // Emerald 500
   },
 });

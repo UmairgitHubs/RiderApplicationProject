@@ -138,11 +138,13 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
         if (taskType === 'pickup') {
             latVal = item.latitude || shipment.pickupLatitude || shipment.pickup_latitude;
             lngVal = item.longitude || shipment.pickupLongitude || shipment.pickup_longitude;
-            address = item.location || shipment.pickupAddress || shipment.pickup_address;
+            // Prioritize shipment address as it's the source of truth
+            address = shipment.pickupAddress || shipment.pickup_address || item.location;
         } else {
             latVal = item.latitude || shipment.deliveryLatitude || shipment.delivery_latitude;
             lngVal = item.longitude || shipment.deliveryLongitude || shipment.delivery_longitude;
-            address = item.location || shipment.deliveryAddress || shipment.delivery_address || shipment.address;
+            // Prioritize shipment address
+            address = shipment.deliveryAddress || shipment.delivery_address || shipment.address || item.location;
         }
         
         // Fallbacks if specific ones missing (e.g. item.latitude might be the correct one regardless of type if provided by backend stop)
@@ -209,7 +211,7 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
             shipmentId: shipment.id,
             trackingId: shipment.trackingNumber || shipment.tracking_number || '',
             recipient: shipment.recipientName || shipment.recipient_name || 'Customer',
-            address: address,
+            address: address, // Now correctly populated from getStopInfo
             distance: `${roadDistanceKm.toFixed(1)} km`, 
             estimatedTime: `${serviceTimeDiff} min`,
             status: 'pending', 
@@ -228,20 +230,27 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
       } else {
         // Handle remaining items with invalid coords
         unvisited.forEach(u => {
-             const s = u.shipment || u;
-             const { taskType } = getStopInfo(u);
+             const shipment = u.shipment || u;
+             const { taskType, address } = getStopInfo(u);
+
+             // Attempt to get backend provided stats if calculation failed
+             const fallbackDist = shipment.distanceKm || shipment.distance_km || '0';
+             const fallbackEta = shipment.estimatedDeliveryTime || shipment.estimated_delivery_time 
+                               ? new Date(shipment.estimatedDeliveryTime || shipment.estimated_delivery_time).toLocaleTimeString([], { hour: '2-digit', minute:'2-digit' }) 
+                               : 'N/A';
+
              optimizedStops.push({
-                 id: u.id || `${s.id || 'unknown'}-${taskType}-${stopOrderCounter}`,
-                 shipmentId: s.id,
-                 trackingId: s.trackingNumber || '',
-                 recipient: s.recipientName || 'Unknown',
-                 address: s.address || 'Unknown',
-                 distance: '0 km', // Invalid coords = 0 km
+                 id: u.id || `fallback-${shipment.id || 'unknown'}-${taskType}-${stopOrderCounter}`,
+                 shipmentId: shipment.id,
+                 trackingId: shipment.trackingNumber || shipment.tracking_number || '',
+                 recipient: shipment.recipientName || shipment.recipient_name || 'Customer',
+                 address: address || 'Unknown',
+                 distance: `${fallbackDist} km`, 
                  estimatedTime: `${DEFAULT_SERVICE_TIME_MIN} min`,
                  status: 'pending',
                  type,
                  taskType,
-                 eta: 'N/A',
+                 eta: fallbackEta,
                  stopNumber: stopOrderCounter++,
                  latitude: 0,
                  longitude: 0
@@ -335,23 +344,36 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
              const pending = dedupedStops.filter((s:any) => s.status !== 'completed' && s.shipment?.status !== 'delivered');
              
              // 1. Map Completed (Keep as is, distance 0 or original)
-             const mappedCompleted: RouteStop[] = completed.map((s:any, i:number) => ({
-                 // Critical: Use valid Stop ID, or composite to ensure uniqueness
-                 id: s.id || `${s.shipment?.id || 'unknown'}-${s.type || 'stop'}-${i}`,
-                 shipmentId: s.shipment?.id || s.shipment_id,
-                 trackingId: s.shipment?.trackingNumber || '',
-                 recipient: s.shipment?.recipientName || 'Customer',
-                 address: s.shipment?.address || s.location || '',
-                 distance: '0 km', // Already done
-                 estimatedTime: '0 min',
-                 status: 'completed' as const,
-                 type: routeType,
-                 taskType: (s.type || ((s.shipment?.status === 'picked_up' || s.shipment?.status === 'in_transit') ? 'delivery' : 'pickup')) as 'pickup' | 'delivery',
-                 eta: 'Completed',
-                 stopNumber: i + 1,
-                 latitude: parseFloat(s.latitude),
-                 longitude: parseFloat(s.longitude)
-             }));
+             const mappedCompleted: RouteStop[] = completed.map((s:any, i:number) => {
+                 const sShipment = s.shipment || {};
+                 const taskType = (s.type || ((sShipment.status === 'picked_up' || sShipment.status === 'in_transit') ? 'delivery' : 'pickup')) as 'pickup' | 'delivery';
+                 
+                 // Resolve address carefully for completed items
+                 let address = '';
+                 if (taskType === 'pickup') {
+                     address = sShipment.pickup_address || sShipment.pickupAddress || s.location;
+                 } else {
+                     address = sShipment.delivery_address || sShipment.deliveryAddress || s.location;
+                 }
+                 
+                 return {
+                     // Critical: Use valid Stop ID, or composite to ensure uniqueness
+                     id: s.id || `${sShipment.id || 'unknown'}-${s.type || 'stop'}-${i}`,
+                     shipmentId: sShipment.id || s.shipment_id,
+                     trackingId: sShipment.trackingNumber || sShipment.tracking_number || '',
+                     recipient: sShipment.recipientName || sShipment.recipient_name || 'Customer',
+                     address: address || '',
+                     distance: '0 km', // Already done
+                     estimatedTime: '0 min',
+                     status: 'completed' as const,
+                     type: routeType,
+                     taskType: taskType,
+                     eta: 'Completed',
+                     stopNumber: i + 1,
+                     latitude: parseFloat(s.latitude),
+                     longitude: parseFloat(s.longitude)
+                 };
+             });
 
              // 2. Optimally Sort Pending based on Current Location
              // Note: We ignore backend sequence to prioritize "Closest First" for the rider

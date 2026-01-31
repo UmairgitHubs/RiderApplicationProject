@@ -117,6 +117,7 @@ export default function RiderEarningsScreen() {
     try {
       console.log('Fetching earnings...');
       const response = await riderApi.getEarnings({});
+
       console.log('Earnings Response:', JSON.stringify(response, null, 2));
       
       // Fix: Check response.success directly, not response.data.success
@@ -210,7 +211,7 @@ export default function RiderEarningsScreen() {
       bg: '#E8F5E9'
     },
     {
-      label: 'This Week',
+      label: 'Last 7 Days',
       value: data?.earningsWeek || 0,
       subtext: `${data?.deliveriesWeek || 0} deliveries`,
       icon: 'calendar',
@@ -218,7 +219,7 @@ export default function RiderEarningsScreen() {
       bg: '#E3F2FD'
     },
     {
-      label: 'This Month',
+      label: 'Last 30 Days',
       value: data?.earningsMonth || 0,
       subtext: `${data?.deliveriesMonth || 0} deliveries`,
       icon: 'stats-chart',

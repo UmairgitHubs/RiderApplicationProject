@@ -114,6 +114,7 @@ export const updateProfile = async (req: Request, res: Response) => {
       notifSystemUpdates,
       businessName,
       businessType,
+      city, // Added city
       cnic,
       licenseNumber,
       vehicleType,
@@ -192,6 +193,7 @@ export const updateProfile = async (req: Request, res: Response) => {
           ...(businessName && { business_name: businessName }),
           ...(businessType && { business_type: businessType }),
           ...(address && { address: address }),
+          ...(city && { city: city }), // Added city update
         },
       });
     }

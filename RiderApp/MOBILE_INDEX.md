@@ -40,6 +40,9 @@ Organized by functional domain or role.
 - `RiderProfileScreen.tsx`, `RiderEditProfileScreen.tsx`.
 - `RiderNotificationsScreen.tsx`.
 - `RoutePlanningScreen.tsx`, `RouteScreen.tsx`.
+- `NavigationScreen.tsx`, `WorkingAreasScreen.tsx`.
+- `PickupConfirmationScreen.tsx`, `DeliveryConfirmationScreen.tsx`.
+- `QRScannerScreen.tsx`, `VehicleInformationScreen.tsx`.
 - `RiderHome.tsx` (Entry).
 
 #### **Common Screens (`common/`)**
