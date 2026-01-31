@@ -184,6 +184,7 @@ model Shipment {
   actual_pickup_time      DateTime?
   actual_delivery_time    DateTime?
   delivery_fee            Decimal            @db.Decimal(10, 2)
+  pickup_fee              Decimal            @default(0) @db.Decimal(10, 2)
   cod_amount              Decimal            @default(0) @db.Decimal(10, 2)
   payment_method          String?
   payment_status          String             @default("pending")

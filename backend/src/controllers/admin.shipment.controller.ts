@@ -263,6 +263,7 @@ export const updateShipment = asyncHandler(async (req: AuthRequest, res: Respons
     pickupAddress,
     codAmount,
     deliveryFee,
+    pickupFee,
     packageWeight,
     packageValue,
     specialInstructions,
@@ -296,6 +297,7 @@ export const updateShipment = asyncHandler(async (req: AuthRequest, res: Respons
   if (pickupAddress) updateData.pickup_address = pickupAddress;
   if (codAmount !== undefined) updateData.cod_amount = codAmount;
   if (deliveryFee !== undefined) updateData.delivery_fee = deliveryFee;
+  if (pickupFee !== undefined) updateData.pickup_fee = pickupFee;
   if (packageWeight !== undefined) updateData.package_weight = packageWeight;
   if (packageValue !== undefined) updateData.package_value = packageValue;
   if (specialInstructions !== undefined) updateData.special_instructions = specialInstructions;

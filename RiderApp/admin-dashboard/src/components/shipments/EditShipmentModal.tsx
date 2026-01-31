@@ -13,6 +13,7 @@ const editShipmentSchema = z.object({
   pickupAddress: z.string().min(1, 'Pickup address is required'),
   codAmount: z.coerce.number().min(0, 'COD amount must be positive'),
   deliveryFee: z.coerce.number().min(0, 'Delivery fee must be positive').optional(),
+  pickupFee: z.coerce.number().min(0, 'Pickup fee must be positive').optional(),
   packageWeight: z.coerce.number().optional(),
   packageValue: z.coerce.number().optional(),
   specialInstructions: z.string().optional(),
@@ -67,6 +68,7 @@ export default function EditShipmentModal({ shipmentId, isOpen, onClose, onShipm
             pickupAddress: getVal('pickup_address', 'pickupAddress') || '',
             codAmount: getNum('cod_amount', 'codAmount'),
             deliveryFee: getNum('delivery_fee', 'deliveryFee'),
+            pickupFee: getNum('pickup_fee', 'pickupFee'),
             packageWeight: getNum('package_weight', 'packageWeight'),
             packageValue: getNum('package_value', 'packageValue'),
             specialInstructions: getVal('special_instructions', 'specialInstructions') || '',
@@ -212,6 +214,10 @@ export default function EditShipmentModal({ shipmentId, isOpen, onClose, onShipm
                         <div className="space-y-2">
                            <label className="text-sm font-medium text-gray-700">Delivery Fee ($)</label>
                            <input type="number" step="0.01" {...register('deliveryFee')} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+                        </div>
+                        <div className="space-y-2">
+                           <label className="text-sm font-medium text-gray-700">Pickup Fee ($)</label>
+                           <input type="number" step="0.01" {...register('pickupFee')} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
                         </div>
                          <div className="space-y-2 col-span-2">
                            <label className="text-sm font-medium text-gray-700">Payment Status</label>
