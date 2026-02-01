@@ -22,7 +22,7 @@ export const sendMessage = asyncHandler(async (req: AuthRequest, res: Response) 
     // Verify shipment exists and user is part of it
     const shipment = await prisma.shipment.findUnique({
         where: { id: shipmentId },
-        select: { id: true, merchant_id: true, rider_id: true }
+        select: { id: true, merchant_id: true, rider_id: true, status: true }
     });
 
     if (!shipment) {
@@ -40,6 +40,15 @@ export const sendMessage = asyncHandler(async (req: AuthRequest, res: Response) 
         return res.status(403).json({
             success: false,
             error: { message: 'Unauthorized: You are not a participant in this shipment delivery.' }
+        });
+    }
+
+    // Check if shipment is active
+    const inactiveStatuses = ['delivered', 'cancelled', 'returned', 'failed'];
+    if (inactiveStatuses.includes(shipment.status)) { // You might need to select status in the query above
+        return res.status(403).json({
+            success: false,
+            error: { message: 'Chat is disabled: This shipment is completed or cancelled.' }
         });
     }
 

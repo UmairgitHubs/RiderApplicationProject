@@ -247,6 +247,8 @@ export default function RiderOrderDetailsScreen({ navigation, route }: any) {
                 distance: displayOrder.distance,
                 estimatedTime: displayOrder.estimatedTime,
                 phone: isHubPickup ? '' : displayOrder.merchantPhone,
+                orderId: order.id,
+                order: order,
               })}
             >
               <Ionicons name="navigate" size={18} color={colors.primary} />
@@ -301,6 +303,8 @@ export default function RiderOrderDetailsScreen({ navigation, route }: any) {
                 distance: displayOrder.distance,
                 estimatedTime: displayOrder.estimatedTime,
                 phone: displayOrder.recipientPhone,
+                orderId: order.id,
+                order: order,
               })}
             >
               <Ionicons name="navigate" size={18} color={colors.primary} />

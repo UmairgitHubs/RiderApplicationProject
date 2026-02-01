@@ -20,7 +20,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors } from '../../theme';
-import { chatApi } from '../../services/api';
+import { shipmentApi, chatApi } from '../../services/api';
 import { socketService } from '../../services/socket';
 
 /**
@@ -52,6 +52,7 @@ export default function ChatScreen() {
   const [loading, setLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [isChatDisabled, setIsChatDisabled] = useState(false);
 
   // Responsive breakpoints
   const isSmallPhone = windowWidth < 360;
@@ -108,6 +109,26 @@ export default function ChatScreen() {
     loadUser();
   }, []);
 
+  // Check Shipment Status
+  useEffect(() => {
+     if (!shipmentId) return;
+     const checkStatus = async () => {
+         try {
+             const response = await shipmentApi.getById(shipmentId) as any;
+             if (response.success && response.data?.shipment) {
+                 const status = response.data.shipment.status;
+                 const inactiveStatuses = ['delivered', 'cancelled', 'returned', 'failed'];
+                 if (inactiveStatuses.includes(status)) {
+                     setIsChatDisabled(true);
+                 }
+             }
+         } catch (e) {
+             console.log('Error checking shipment status', e);
+         }
+     };
+     checkStatus();
+  }, [shipmentId]);
+
   const fetchMessages = async () => {
       if (!shipmentId) return;
       try {
@@ -121,17 +142,11 @@ export default function ChatScreen() {
               createdAt: m.created_at
             }));
             
-            // Merge with existing to avoid jitter, or just replace?
-            // Replacing is cleaner for sync, but we want to keep optimistic msgs?
-            // Simple replace is safest for "History Sync".
-            // But we must preserve "pending" messages that are not in backend yet.
-            
             setMessages(prev => {
                 const pending = prev.filter(m => m.id.toString().startsWith('temp-'));
                 const newIds = new Set(formatted.map(m => m.id));
-                const uniquePending = pending.filter(p => !newIds.has(p.id)); // Should typically be all pending
+                const uniquePending = pending.filter(p => !newIds.has(p.id)); 
                 
-                // Sort combined
                 const combined = [...formatted, ...uniquePending].sort((a, b) => 
                     new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
                 );
@@ -139,7 +154,7 @@ export default function ChatScreen() {
             });
           }
       } catch (err) {
-          console.error('Polling Errosr:', err);
+          console.error('Polling Error:', err);
       } finally {
         setLoading(false);
       }
@@ -165,14 +180,11 @@ export default function ChatScreen() {
 
         if (socket.connected) joinRoom();
         
-        socket.on('connect', joinRoom); // Re-join on reconnect
+        socket.on('connect', joinRoom); 
 
         socket.on('chat:new-message', (data: any) => {
           if (data.orderId === shipmentId || data.shipmentId === shipmentId) {
-             // ... existing logic ...
              const m = data.message;
-             // ... existing dedupe logic ...
-             // (Keeping the logic I just added in previous turn)
              
             console.log('📩 New Message Received:', { 
                 id: m.id, 
@@ -182,10 +194,8 @@ export default function ChatScreen() {
             });
 
             setMessages(prev => {
-              // 1. Exact ID check
               if (prev.some(msg => msg.id === m.id)) return prev;
 
-              // 2. Fuzzy Deduplication (Content Match + Pending)
               const pendingIndex = prev.findIndex(msg => 
                 msg.id.toString().startsWith('temp-') && 
                 msg.text === (m.content || m.text)
@@ -226,12 +236,16 @@ export default function ChatScreen() {
     return () => {
       if (socket) {
         socket.off('chat:new-message');
-        socket.off('connect'); // Cleanup listener
+        socket.off('connect'); 
       }
     };
   }, [shipmentId, currentUserId]);
 
   const handleSend = async (text: string = inputText) => {
+    if (isChatDisabled) {
+        Alert.alert('Chat Closed', 'This shipment is completed. Chat is no longer active.');
+        return;
+    }
     const trimmedText = text.trim();
     if (!trimmedText || !shipmentId) return;
 
@@ -349,6 +363,16 @@ export default function ChatScreen() {
         </View>
       </View>
 
+      {/* Disabled Banner */}
+      {isChatDisabled && (
+          <View style={styles.disabledBanner}>
+              <Ionicons name="lock-closed" size={16} color="#FFF" />
+              <Text style={styles.disabledBannerText}>
+                  Chat is read-only because this shipment is completed.
+              </Text>
+          </View>
+      )}
+
       {/* Content with KeyboardAvoidingView */}
       <KeyboardAvoidingView 
         style={styles.flex1}
@@ -368,6 +392,7 @@ export default function ChatScreen() {
         />
 
         {/* Footer */}
+        {!isChatDisabled && (
         <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 10) }]}>
           {/* Quick Replies */}
           {(messages.length < 5 || !isSmallPhone) && keyboardHeight === 0 && (
@@ -420,6 +445,7 @@ export default function ChatScreen() {
             </TouchableOpacity>
           </View>
         </View>
+        )}
       </KeyboardAvoidingView>
     </View>
   );
@@ -620,5 +646,18 @@ const styles = StyleSheet.create({
     backgroundColor: '#E0E0E0',
     shadowOpacity: 0,
     elevation: 0,
+  },
+  disabledBanner: {
+      backgroundColor: '#64748B',
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 10,
+      gap: 8,
+  },
+  disabledBannerText: {
+      color: '#FFF',
+      fontSize: 13,
+      fontWeight: '600',
   },
 });

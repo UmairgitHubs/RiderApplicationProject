@@ -92,8 +92,18 @@ export const setupSocket = (io: Server) => {
           });
 
           if (shipment) {
-            // Emit to merchant
+            // Emit to merchant (User Room)
             io.to(`user:${shipment.merchant_id}`).emit('shipment:location-update', {
+              shipmentId: data.shipmentId,
+              location: {
+                lat: data.latitude,
+                lng: data.longitude,
+              },
+              timestamp: new Date().toISOString(),
+            });
+            
+            // Emit to Order Room (More robust for tracking screens)
+            io.to(`order:${data.shipmentId}`).emit('shipment:location-update', {
               shipmentId: data.shipmentId,
               location: {
                 lat: data.latitude,
@@ -224,12 +234,19 @@ export const setupSocket = (io: Server) => {
         // Fetch shipment to determine participants and security
         const shipment = await prisma.shipment.findUnique({
              where: { id: orderId },
-             select: { merchant_id: true, rider_id: true }
+             select: { merchant_id: true, rider_id: true, status: true }
         });
 
         if (!shipment) {
              socket.emit('error', { message: 'Order not found' });
              return;
+        }
+
+        // Check active status
+        const inactiveStatuses = ['delivered', 'cancelled', 'returned', 'failed'];
+        if (inactiveStatuses.includes(shipment.status)) {
+            socket.emit('error', { message: 'Chat is disabled: This shipment is completed or cancelled.' });
+            return;
         }
 
         let finalRecipientId = recipientId;

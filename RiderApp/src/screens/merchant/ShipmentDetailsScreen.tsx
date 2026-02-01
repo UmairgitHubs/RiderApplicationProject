@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,37 +9,33 @@ import {
   Alert,
   ActivityIndicator,
   Dimensions,
-  ScrollView,
 } from 'react-native';
+import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
 import { colors, spacing, borderRadius } from '../../theme';
 import { shipmentApi } from '../../services/api';
-
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-
-/**
- * Live Tracking Screen - Pixel Perfect Design Match
- * Refined for exact UI/UX alignment with the provided screenshot.
- * Optimised for all screen sizes with flexible layout and dynamic content.
- */
+import { socketService } from '../../services/socket';
 
 const ORANGE = '#F37022';
 const GREEN = '#00C853';
-const LIGHT_BLUE_BOX = '#F3F6FF';
-const MAP_ACCENT = '#1A73E8';
 
 export default function ShipmentDetailsScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const insets = useSafeAreaInsets();
+  const mapRef = useRef<MapView>(null);
+
   const [loading, setLoading] = useState(true);
   const [shipment, setShipment] = useState<any>(null);
+  const [riderLocation, setRiderLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [eta, setEta] = useState<string>('Calculating...');
+  const [distance, setDistance] = useState<string>('...');
 
   const shipmentId = route.params?.shipmentId || route.params?.id;
 
+  // Initial Fetch
   useEffect(() => {
     fetchShipmentDetails();
   }, [shipmentId]);
@@ -51,19 +47,154 @@ export default function ShipmentDetailsScreen() {
       const response = await shipmentApi.getById(shipmentId) as any;
       if (response.success && response.data?.shipment) {
         setShipment(response.data.shipment);
+        
+        // If rider has a current location in DB, set it initially
+        if (response.data.shipment.rider) {
+            const { current_latitude, current_longitude } = response.data.shipment.rider;
+            if (current_latitude && current_longitude) {
+                setRiderLocation({
+                    latitude: parseFloat(current_latitude),
+                    longitude: parseFloat(current_longitude)
+                });
+            }
+        }
       }
     } catch (e) {
       console.error('[LiveTracking] Fetch Error:', e);
+      Alert.alert('Error', 'Failed to load shipment details');
     } finally {
       setLoading(false);
     }
   };
 
+  // Socket Connection for Live Updates
+  useEffect(() => {
+    let socket: any;
+
+    const connectSocket = async () => {
+        socket = await socketService.connect();
+        if (socket) {
+            console.log('🔌 Connected to socket for tracking:', shipmentId);
+            
+            // Join the specific order room for reliable updates
+            socket.emit('join_order', { orderId: shipmentId });
+
+            // Listen for location updates
+            socket.on('shipment:location-update', (data: any) => {
+                if (data.shipmentId === shipmentId && data.location) {
+                    console.log('📍 New Rider Location:', data.location);
+                    const newLocation = {
+                        latitude: data.location.lat,
+                        longitude: data.location.lng
+                    };
+                    setRiderLocation(newLocation);
+                    
+                    // Animate map to new location
+                    mapRef.current?.animateCamera({
+                        center: newLocation,
+                        zoom: 15
+                    }, { duration: 1000 });
+                }
+            });
+
+            // Listen for status updates
+            socket.on('shipment:status-update', (data: any) => {
+                if (data.shipmentId === shipmentId) {
+                    // Refresh details to get full updated object if needed
+                    fetchShipmentDetails(); 
+                }
+            });
+        }
+    };
+
+    connectSocket();
+
+    return () => {
+        if (socket) {
+            socket.off('shipment:location-update');
+            socket.off('shipment:status-update');
+        }
+    };
+  }, [shipmentId]);
+
+  // Calculate Distance Helper
+  const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+    const R = 6371; // Radius of the earth in km
+    const dLat = deg2rad(lat2 - lat1);
+    const dLon = deg2rad(lon2 - lon1);
+    const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const d = R * c; // Distance in km
+    return d;
+  };
+
+  const deg2rad = (deg: number) => {
+    return deg * (Math.PI / 180);
+  };
+
+  // Recalculate ETA and Distance
+  useEffect(() => {
+    if (!riderLocation || !shipment) return;
+
+    let targetLat: number | null = null;
+    let targetLng: number | null = null;
+    
+    // Determine target based on status
+    if (['pending', 'assigned'].includes(shipment.status)) {
+        // Going to pickup
+        if (shipment.pickup_latitude && shipment.pickup_longitude) {
+            targetLat = parseFloat(shipment.pickup_latitude);
+            targetLng = parseFloat(shipment.pickup_longitude);
+        }
+    } else {
+        // Going to delivery (or default)
+        if (shipment.delivery_latitude && shipment.delivery_longitude) {
+            targetLat = parseFloat(shipment.delivery_latitude);
+            targetLng = parseFloat(shipment.delivery_longitude);
+        }
+    }
+
+    if (targetLat && targetLng) {
+        const dist = calculateDistance(riderLocation.latitude, riderLocation.longitude, targetLat, targetLng);
+        setDistance(`${dist.toFixed(1)} km`);
+        
+        // Estimate ETA: Assuming 20km/h avg speed in city = 3 min per km + 5 min buffer
+        // Or simplified: (dist / speed) * 60
+        const speedKmph = 20; 
+        const timeHours = dist / speedKmph;
+        const timeMins = Math.ceil(timeHours * 60) + 5; // +5 mins for parking/handover
+        
+        if (timeMins > 60) {
+            const h = Math.floor(timeMins / 60);
+            const m = timeMins % 60;
+            setEta(`${h} hr ${m} min`);
+        } else {
+            setEta(`${timeMins} min`);
+        }
+
+        // Auto Fit Map (Debounced slightly preferred but direct is ok for now)
+        if (mapRef.current) {
+            mapRef.current.fitToCoordinates([
+                riderLocation,
+                { latitude: targetLat, longitude: targetLng }
+            ], {
+                edgePadding: { top: 100, right: 50, bottom: 300, left: 50 },
+                animated: true
+            });
+        }
+    }
+  }, [riderLocation, shipment]);
+
+  // Handle Calls
   const handleCall = (phone: string) => {
     if (phone) Linking.openURL(`tel:${phone}`);
     else Alert.alert('Info', 'Phone number not available');
   };
 
+  // Open External Maps
   const handleOpenMaps = () => {
     const address = shipment?.delivery_address || shipment?.deliveryAddress;
     if (address) {
@@ -84,11 +215,15 @@ export default function ShipmentDetailsScreen() {
     );
   }
 
-  if (!shipment) return null;
+  if (!shipment) return (
+      <View style={styles.errorContainer}>
+          <Text>Shipment not found</Text>
+      </View>
+  );
 
   return (
     <View style={styles.container}>
-      {/* Orange Header Container */}
+      {/* Orange Header */}
       <View style={[styles.header, { paddingTop: insets.top + (Platform.OS === 'ios' ? 0 : 10) }]}>
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color="#FFF" />
@@ -96,19 +231,56 @@ export default function ShipmentDetailsScreen() {
         <View style={styles.headerTitleBox}>
           <Text style={styles.headerTitle}>Live Tracking</Text>
           <Text style={styles.headerSubTitle}>
-            {shipment.tracking_number || shipment.trackingNumber || 'CE2024001234567'}
+            {shipment.tracking_number || shipment.trackingNumber || 'Tracking...'}
           </Text>
         </View>
       </View>
 
-      {/* Map Simulation Area */}
-      <View style={styles.mapArea}>
-        <LinearGradient 
-          colors={['#E1F5FE', '#FFFFFF']} 
-          style={StyleSheet.absoluteFill} 
-        />
+      {/* Map View */}
+      <View style={styles.mapContainer}>
+        <MapView
+            ref={mapRef}
+            style={StyleSheet.absoluteFill}
+            provider={PROVIDER_GOOGLE}
+            initialRegion={{
+                latitude: riderLocation?.latitude || (shipment?.pickup_latitude ? parseFloat(shipment.pickup_latitude) : 33.6844),
+                longitude: riderLocation?.longitude || (shipment?.pickup_longitude ? parseFloat(shipment.pickup_longitude) : 73.0479),
+                latitudeDelta: 0.05,
+                longitudeDelta: 0.05,
+            }}
+        >
+            {riderLocation && (
+                <Marker 
+                    coordinate={riderLocation}
+                    title={shipment.rider?.full_name || "Rider"}
+                    description="Current Location"
+                >
+                    <View style={styles.markerContainer}>
+                        <View style={styles.markerCircle}>
+                             <MaterialCommunityIcons name="bike" size={20} color="#FFF" />
+                        </View>
+                        <View style={styles.markerArrow} />
+                    </View>
+                </Marker>
+            )}
+            
+            {/* Destination Marker */}
+             {(
+              (['pending', 'assigned'].includes(shipment.status) && shipment.pickup_latitude && shipment.pickup_longitude) ||
+              (!['pending', 'assigned'].includes(shipment.status) && shipment.delivery_latitude && shipment.delivery_longitude)
+             ) && (
+                <Marker
+                    coordinate={{
+                        latitude: parseFloat(['pending', 'assigned'].includes(shipment.status) ? shipment.pickup_latitude : shipment.delivery_latitude),
+                        longitude: parseFloat(['pending', 'assigned'].includes(shipment.status) ? shipment.pickup_longitude : shipment.delivery_longitude)
+                    }}
+                    title={['pending', 'assigned'].includes(shipment.status) ? "Pickup" : "Delivery"}
+                    pinColor={GREEN}
+                />
+             )}
+        </MapView>
         
-        {/* Floating Eta Card */}
+        {/* Floating ETA Card */}
         <View style={styles.floatingEtaCard}>
           <View style={styles.etaRow1}>
             <View style={styles.etaIconCircle}>
@@ -116,7 +288,7 @@ export default function ShipmentDetailsScreen() {
             </View>
             <View style={styles.flex1}>
               <Text style={styles.labelMuted}>Estimated Delivery</Text>
-              <Text style={styles.etaMainText}>17 min</Text>
+              <Text style={styles.etaMainText}>{eta}</Text>
             </View>
           </View>
           
@@ -125,35 +297,22 @@ export default function ShipmentDetailsScreen() {
           <View style={styles.metaRow}>
             <View style={styles.flex1}>
               <Text style={styles.labelMuted}>Distance</Text>
-              <Text style={styles.metaWeight}>2.3 km</Text>
+              <Text style={styles.metaWeight}>{distance}</Text>
             </View>
             <View style={styles.flex1}>
               <Text style={styles.labelMuted}>Status</Text>
-              <Text style={[styles.metaWeight, { color: GREEN }]}>On the way</Text>
+              <Text style={[styles.metaWeight, { color: GREEN }]}>
+                {shipment.status === 'out_for_delivery' ? 'On the way' : shipment.status.replace(/_/g, ' ')}
+              </Text>
             </View>
           </View>
-        </View>
-
-        {/* Simulated path line */}
-        <View style={styles.mapPath} />
-
-        {/* Rider marker mockup */}
-        <View style={[styles.riderMarkerWrapper, { top: '50%', right: '25%' }]}>
-           <View style={styles.riderNameBadge}>
-              <Text style={styles.riderNameBadgeText}>
-                 {shipment.rider?.full_name?.split(' ')[0] || 'Alex Rider'}
-              </Text>
-           </View>
-           <View style={styles.navMarkerCircle}>
-             <MaterialCommunityIcons name="navigation-variant" size={20} color="#FFF" style={{ transform: [{rotate: '45deg'}] }} />
-           </View>
         </View>
       </View>
 
       {/* Action Details Panel */}
       <View style={[styles.detailsPanel, { paddingBottom: insets.bottom + 20 }]}>
         
-        {/* User Card */}
+        {/* Rider Info */}
         <View style={styles.riderInfoBox}>
           <View style={styles.avatarOrange}>
             <Text style={styles.avatarLabel}>
@@ -161,28 +320,32 @@ export default function ShipmentDetailsScreen() {
             </Text>
           </View>
           <View style={styles.flex1}>
-            <Text style={styles.boldDetailName}>{shipment.rider?.full_name || 'Alex Rider'}</Text>
+            <Text style={styles.boldDetailName}>{shipment.rider?.full_name || 'Finding Rider...'}</Text>
             <Text style={styles.subDetailText}>Your delivery rider</Text>
           </View>
           <View style={styles.sideEta}>
-             <Text style={styles.sideEtaVal}>17 min</Text>
+             <Text style={styles.sideEtaVal}>{eta}</Text>
              <Text style={styles.sideEtaLabel}>away</Text>
           </View>
         </View>
 
-        {/* Address Row */}
+        {/* Address */}
         <View style={styles.locationSection}>
            <View style={styles.pinkCircle}>
               <Ionicons name="location" size={20} color="#F44336" />
            </View>
            <View style={styles.flex1}>
               <Text style={styles.locHeading}>Delivery Address</Text>
-              <Text style={styles.locMain}>{shipment.delivery_address || shipment.deliveryAddress || '456 Park Ave, Brooklyn, NY 11201'}</Text>
-              <Text style={styles.locOwner}>{shipment.recipient_name || shipment.recipientName || 'Sarah Johnson'}</Text>
+              <Text style={styles.locMain} numberOfLines={2}>
+                {shipment.delivery_address || shipment.deliveryAddress || 'Address not available'}
+              </Text>
+              <Text style={styles.locOwner}>
+                {shipment.recipient_name || shipment.recipientName || 'Customer'}
+              </Text>
            </View>
         </View>
 
-        {/* Multi-Buttons */}
+        {/* Action Buttons */}
         <View style={styles.btnPair}>
            <TouchableOpacity 
              style={[styles.baseBtn, { backgroundColor: GREEN }]} 
@@ -197,21 +360,23 @@ export default function ShipmentDetailsScreen() {
              style={[styles.baseBtn, { backgroundColor: '#2979FF' }]} 
              activeOpacity={0.8}
              onPress={() => navigation.navigate('Chat', {
-                recipientName: shipment.rider?.full_name || 'Alex Rider',
+                recipientName: shipment.rider?.full_name || 'Rider',
                 recipientRole: 'Rider',
+                recipientId: shipment.rider?.id,
                 shipmentId: shipment.id
              })}
+             disabled={!shipment.rider}
            >
               <Ionicons name="chatbubble" size={18} color="#FFF" />
               <Text style={styles.btnTextWhite}>Chat</Text>
            </TouchableOpacity>
         </View>
 
-        {/* Secondary Buttons */}
         <TouchableOpacity 
           style={styles.grayBtn} 
           activeOpacity={0.7}
           onPress={() => handleCall(shipment.rider?.phone)}
+          disabled={!shipment.rider}
         >
            <Ionicons name="call-outline" size={18} color="#455A64" />
            <Text style={styles.btnTextGray}>Call Rider</Text>
@@ -241,6 +406,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  errorContainer: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+  },
   header: {
     backgroundColor: ORANGE,
     flexDirection: 'row',
@@ -265,7 +435,7 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.85)',
     fontWeight: '500',
   },
-  mapArea: {
+  mapContainer: {
     flex: 1,
     backgroundColor: '#F0F3F6',
   },
@@ -323,46 +493,6 @@ const styles = StyleSheet.create({
     color: '#222',
   },
   flex1: { flex: 1 },
-  mapPath: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    right: '25%',
-    width: 2,
-    borderColor: '#1976D2',
-    borderWidth: 1.5,
-    borderStyle: 'dashed',
-    opacity: 0.3,
-  },
-  riderMarkerWrapper: {
-    position: 'absolute',
-    alignItems: 'center',
-  },
-  riderNameBadge: {
-    backgroundColor: '#0D47A1',
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 10,
-    marginBottom: 5,
-  },
-  riderNameBadgeText: {
-    color: '#FFF',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  navMarkerCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#2979FF',
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 5 },
-    shadowOpacity: 0.3,
-    shadowRadius: 5,
-    elevation: 5,
-  },
   detailsPanel: {
     backgroundColor: '#FFF',
     borderTopLeftRadius: 30,
@@ -374,6 +504,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 10,
     elevation: 20,
+    marginTop: -30, // Overlap map nicely
   },
   riderInfoBox: {
     flexDirection: 'row',
@@ -423,6 +554,7 @@ const styles = StyleSheet.create({
   locationSection: {
     flexDirection: 'row',
     marginBottom: 24,
+    alignItems: 'center',
   },
   pinkCircle: {
     width: 44,
@@ -494,4 +626,31 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 10,
   },
+  markerContainer: {
+      alignItems: 'center',
+  },
+  markerCircle: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: '#2979FF',
+      justifyContent: 'center',
+      alignItems: 'center',
+      borderWidth: 2,
+      borderColor: '#FFF',
+  },
+  markerArrow: {
+      width: 0,
+      height: 0,
+      backgroundColor: 'transparent',
+      borderStyle: 'solid',
+      borderLeftWidth: 6,
+      borderRightWidth: 6,
+      borderBottomWidth: 10,
+      borderLeftColor: 'transparent',
+      borderRightColor: 'transparent',
+      borderBottomColor: '#2979FF',
+      transform: [{ rotate: '180deg' }],
+      marginTop: -2,
+  }
 });

@@ -6,6 +6,7 @@ import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, spacing, borderRadius } from '../../theme';
+import { socketService } from '../../services/socket';
 
 const { width, height } = Dimensions.get('window');
 const GOOGLE_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY;
@@ -88,14 +89,32 @@ export default function NavigationScreen() {
       subscription = await Location.watchPositionAsync(
         {
           accuracy: Location.Accuracy.BestForNavigation,
-          timeInterval: 2000, 
+          timeInterval: 5000, 
           distanceInterval: 10 
         },
-        (newLoc) => {
-          const { latitude, longitude, heading } = newLoc.coords;
+        async (newLoc) => {
+          const { latitude, longitude, heading, speed, accuracy } = newLoc.coords;
           setUserLocation(newLoc.coords);
           setUserHeading(heading || 0);
           
+          // Emit Location Update to Socket
+          try {
+             // Ensure socket is connected (idempotent)
+             const socket = await socketService.connect();
+             if (socket) {
+                 socket.emit('rider:location-update', {
+                     latitude,
+                     longitude,
+                     heading: heading || 0,
+                     speed: speed || 0,
+                     accuracy: accuracy || 0,
+                     shipmentId: orderId || order?.id // Use orderId as shipmentId
+                 });
+             }
+          } catch (err) {
+              console.log('Socket emit error', err);
+          }
+
           if (navState === 'active' && hasValidDest) {
              mapRef.current?.animateCamera({
                  center: { latitude, longitude },
@@ -123,7 +142,7 @@ export default function NavigationScreen() {
     return () => {
       if (subscription) subscription.remove();
     };
-  }, [navState, hasValidDest]);
+  }, [navState, hasValidDest, orderId]);
 
   const updateRouteDetails = async (startLat: number, startLng: number) => {
       if (!GOOGLE_API_KEY || !hasValidDest) return;
