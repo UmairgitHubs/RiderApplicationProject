@@ -167,8 +167,16 @@ export default function ShipmentsPage() {
         })
         window.open(doc.output('bloburl'), '_blank')
       } else if (type === 'csv') {
-        const headers = ['Tracking ID', 'Date', 'Merchant', 'Customer', 'Status', 'COD Amount']
-        const rows = allShipments.map((d: any) => [d.trackingNumber || d.id, new Date(d.createdAt).toLocaleDateString(), `"${d.merchantName || 'N/A'}"`, `"${d.recipientName || 'N/A'}"`, d.status, d.amount || 0])
+        const headers = ['Tracking ID', 'Type', 'Date', 'Merchant', 'Customer', 'Status', 'COD Amount']
+        const rows = allShipments.map((d: any) => [
+            d.trackingNumber || d.id, 
+            (d.shipmentType === 'franchise' || d.shipment_type === 'franchise') ? 'Franchise' : 'Individual',
+            new Date(d.createdAt).toLocaleDateString(), 
+            `"${d.merchantName || 'N/A'}"`, 
+            `"${d.recipientName || 'N/A'}"`, 
+            d.status, 
+            d.amount || 0
+        ])
         const csvContent = [headers.join(','), ...rows.map((row: any[]) => row.join(','))].join('\n')
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
         const url = URL.createObjectURL(blob); const link = document.createElement('a')
@@ -177,8 +185,16 @@ export default function ShipmentsPage() {
       } else if (type === 'pdf') {
         const doc = new jsPDF()
         doc.setTextColor(249, 115, 22).setFontSize(18).setFont("helvetica", "bold").text('Shipments Report', 14, 20)
-        const tableRows = allShipments.map((d: any) => [d.trackingNumber || d.id, d.merchantName, d.recipientName, d.status, formatCurrency(d.amount || 0), new Date(d.createdAt).toLocaleDateString()])
-        autoTable(doc, { startY: 40, head: [['Tracking ID', 'Merchant', 'Customer', 'Status', 'COD', 'Date']], body: tableRows, theme: 'striped', headStyles: { fillColor: [249, 115, 22], textColor: 255 } })
+        const tableRows = allShipments.map((d: any) => [
+            d.trackingNumber || d.id, 
+            (d.shipmentType === 'franchise' || d.shipment_type === 'franchise') ? 'Franchise' : 'Individual',
+            d.merchantName, 
+            d.recipientName, 
+            d.status, 
+            formatCurrency(d.amount || 0), 
+            new Date(d.createdAt).toLocaleDateString()
+        ])
+        autoTable(doc, { startY: 40, head: [['Tracking ID', 'Type', 'Merchant', 'Customer', 'Status', 'COD', 'Date']], body: tableRows, theme: 'striped', headStyles: { fillColor: [249, 115, 22], textColor: 255 } })
         doc.save(`shipments_report_${formatLocalDate(new Date())}.pdf`)
       }
     } catch (error) {
@@ -267,7 +283,8 @@ export default function ShipmentsPage() {
         status: s.status,
         codAmount: Number(s.amount || s.codAmount || 0),
         codStatus: s.paymentStatus || 'Pending',
-        priority: 'Normal'
+        priority: 'Normal',
+        type: (s.shipmentType === 'franchise' || s.shipment_type === 'franchise') ? 'Franchise' : 'Individual'
       }));
   }, [rawShipments]);
 

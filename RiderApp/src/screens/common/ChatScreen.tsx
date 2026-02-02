@@ -129,18 +129,41 @@ export default function ChatScreen() {
      checkStatus();
   }, [shipmentId]);
 
+  // Helper for ID comparison
+  const isSameUser = (id1: any, id2: any) => {
+    if (!id1 || !id2) return false;
+    return String(id1).trim().toLowerCase() === String(id2).trim().toLowerCase();
+  };
+
   const fetchMessages = async () => {
       if (!shipmentId) return;
       try {
           const response = await chatApi.getShipmentMessages(shipmentId);
           if (response.success) {
-            const formatted: Message[] = response.data.map((m: any) => ({
-              id: m.id,
-              text: m.content || m.text,
-              sender: (String(m.sender_id) === String(currentUserId) || String(m.senderId) === String(currentUserId)) ? 'me' : 'other',
-              time: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-              createdAt: m.created_at
-            }));
+            const currentId = currentUserId; 
+            
+            // DEBUG: Log first message comparison to catch mismatches
+            if (response.data.length > 0 && currentId) {
+                const first = response.data[0];
+                const sId = first.senderId || first.sender_id;
+                console.log('🔍 Message Fetch Debug:', { 
+                    firstMsgId: first.id,
+                    senderId: sId,
+                    myId: currentId,
+                    match: isSameUser(sId, currentId)
+                });
+            }
+
+            const formatted: Message[] = response.data.map((m: any) => {
+              const sId = m.senderId || m.sender_id;
+              return {
+                  id: m.id,
+                  text: m.content || m.text,
+                  sender: isSameUser(sId, currentId) ? 'me' : 'other',
+                  time: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                  createdAt: m.created_at
+              };
+            });
             
             setMessages(prev => {
                 const pending = prev.filter(m => m.id.toString().startsWith('temp-'));
@@ -167,79 +190,84 @@ export default function ChatScreen() {
     return () => clearInterval(interval);
   }, [shipmentId, currentUserId]);
 
+  // Keep ref in sync for socket callbacks
+  const userIdRef = useRef(currentUserId);
+  useEffect(() => {
+    userIdRef.current = currentUserId;
+  }, [currentUserId]);
+
   // Socket setup
   useEffect(() => {
     let socket: any;
-    const setupSocket = async () => {
+
+    const initSocket = async () => {
       socket = await socketService.connect();
+      
       if (socket) {
-        const joinRoom = () => {
-            console.log('🔌 Joining Order Room:', shipmentId);
-            socket.emit('join_order', { orderId: shipmentId });
-        };
+        socket.emit('join_order', { orderId: shipmentId });
+        console.log(`🔌 Joining Order Room: order:${shipmentId}`);
 
-        if (socket.connected) joinRoom();
-        
-        socket.on('connect', joinRoom); 
+        const handleNewMessage = (data: any) => {
+          if (data.orderId !== shipmentId && data.shipmentId !== shipmentId) return;
 
-        socket.on('chat:new-message', (data: any) => {
-          if (data.orderId === shipmentId || data.shipmentId === shipmentId) {
-             const m = data.message;
-             
-            console.log('📩 New Message Received:', { 
-                id: m.id, 
-                senderId: m.senderId || m.sender_id, 
-                currentUserId, 
-                content: m.content 
-            });
+          const m = data.message;
+          const msgSenderId = m.senderId || m.sender_id;
+          const currentId = userIdRef.current; // Use Ref for latest value
+          const isMe = isSameUser(msgSenderId, currentId);
 
-            setMessages(prev => {
-              if (prev.some(msg => msg.id === m.id)) return prev;
+          console.log('📩 New Message Realtime:', { 
+              msgId: m.id, 
+              isMe,
+              senderId: msgSenderId,
+              myId: currentId
+          });
 
-              const pendingIndex = prev.findIndex(msg => 
+          setMessages(prev => {
+             if (prev.some(msg => msg.id === m.id)) return prev;
+
+             const pendingIndex = prev.findIndex(msg => 
                 msg.id.toString().startsWith('temp-') && 
                 msg.text === (m.content || m.text)
-              );
+             );
 
-              if (pendingIndex !== -1) {
-                const newMsgs = [...prev];
-                newMsgs[pendingIndex] = {
-                    ...newMsgs[pendingIndex],
-                    id: m.id,
-                    sender: 'me',
-                    createdAt: m.created_at || m.createdAt,
-                    time: new Date(m.created_at || m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                };
-                return newMsgs;
-              }
-
-              const isMe = (String(m.sender_id) === String(currentUserId) || String(m.senderId) === String(currentUserId));
-              
-              const newMessage: Message = {
+             const formattedMessage: Message = {
                 id: m.id,
                 text: m.content || m.text,
                 sender: isMe ? 'me' : 'other',
-                time: new Date(m.created_at || m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                createdAt: m.created_at || m.createdAt
-              };
-              return [newMessage, ...prev];
-            });
-          }
+                time: new Date(m.createdAt || m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                createdAt: m.createdAt || m.created_at
+             };
+
+             if (pendingIndex !== -1) {
+                const newMsgs = [...prev];
+                newMsgs[pendingIndex] = formattedMessage;
+                return newMsgs;
+             }
+             return [formattedMessage, ...prev];
+          });
+        };
+
+        // Remove any existing listener for this event to prevent duplicates
+        socket.off('chat:new-message'); 
+        socket.on('chat:new-message', handleNewMessage);
+        
+        socket.on('connect', () => {
+            console.log('♻️ Reconnected, re-joining room...');
+            socket.emit('join_order', { orderId: shipmentId });
         });
       }
     };
 
-    if (shipmentId && currentUserId) {
-      setupSocket();
+    if (shipmentId) { // Removed currentUserId dependency to avoid re-binding loop, using Ref instead
+      initSocket();
     }
 
     return () => {
       if (socket) {
         socket.off('chat:new-message');
-        socket.off('connect'); 
       }
     };
-  }, [shipmentId, currentUserId]);
+  }, [shipmentId]); // Only depend on shipmentId to keep connection stable
 
   const handleSend = async (text: string = inputText) => {
     if (isChatDisabled) {

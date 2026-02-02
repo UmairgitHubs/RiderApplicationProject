@@ -283,6 +283,7 @@ export const setupSocket = (io: Server) => {
             content: message.content,
             senderId: message.sender_id,
             senderName: message.sender.full_name,
+            senderRole: message.sender.role,
             createdAt: message.created_at
           }
         });
@@ -297,36 +298,39 @@ export const setupSocket = (io: Server) => {
                     content: message.content,
                     senderId: message.sender_id,
                     senderName: message.sender.full_name,
+                    senderRole: message.sender.role,
                     createdAt: message.created_at
                 }
             });
         }
 
         // Offline logic: If recipient is not in the room
-        const room = io.sockets.adapter.rooms.get(`order:${orderId}`);
-        const recipientRoom = io.sockets.adapter.rooms.get(`user:${recipientId}`);
-        
-        // Check if recipient is "offline" (not connected to socket or not in the order room)
-        const isRecipientInOrderRoom = room && Array.from(room).some(id => {
-          const s = io.sockets.sockets.get(id) as AuthenticatedSocket;
-          return s && s.user?.id === recipientId;
-        });
+        if (finalRecipientId) {
+             const room = io.sockets.adapter.rooms.get(`order:${orderId}`);
+             
+             // Check if recipient is "offline" (not connected to socket or not in the order room)
+             // Using finalRecipientId which is now guaranteed to be set if we are here
+             const isRecipientInOrderRoom = room && Array.from(room).some(id => {
+               const s = io.sockets.sockets.get(id) as AuthenticatedSocket;
+               return s && s.user?.id === finalRecipientId;
+             });
 
-        if (!isRecipientInOrderRoom) {
-          const recipient = await prisma.user.findUnique({
-            where: { id: recipientId },
-            select: { fcm_token: true }
-          });
+             if (!isRecipientInOrderRoom) {
+               const recipient = await prisma.user.findUnique({
+                 where: { id: finalRecipientId },
+                 select: { fcm_token: true }
+               });
 
-          if (recipient?.fcm_token) {
-            const { sendPushNotification } = await import('../services/firebase.service');
-            await sendPushNotification(
-              recipient.fcm_token,
-              `New message from ${socket.user?.fullName || 'User'}`,
-              content,
-              { orderId, type: 'chat' }
-            );
-          }
+               if (recipient?.fcm_token) {
+                 const { sendPushNotification } = await import('../services/firebase.service');
+                 await sendPushNotification(
+                   recipient.fcm_token,
+                   `New message from ${socket.user?.fullName || 'User'}`,
+                   content,
+                   { orderId, type: 'chat' }
+                 );
+               }
+             }
         }
 
         socket.emit('send_message:success', { messageId: message.id });

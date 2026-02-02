@@ -1,4 +1,4 @@
-import { Eye, Edit2, Share2 } from 'lucide-react'
+import { Eye, Edit2, Share2, Building2, User } from 'lucide-react'
 import { Shipment } from '@/types/shipment'
 
 interface ShipmentTableProps {
@@ -34,12 +34,30 @@ export default function ShipmentTable({ shipments, onViewClick, onEditClick, onA
     }
   }
 
+  const getTypeBadge = (type: 'Individual' | 'Franchise') => {
+      if (type === 'Franchise') {
+          return (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-600 border border-indigo-100">
+                  <Building2 className="w-3 h-3" />
+                  Franchise
+              </span>
+          )
+      }
+      return (
+            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-50 text-gray-600 border border-gray-100">
+                <User className="w-3 h-3" />
+                Individual
+            </span>
+      )
+  }
+
   
   return (
     <table className="w-full text-sm text-left">
       <thead className="bg-gray-50 text-gray-700 font-semibold border-b border-gray-100">
         <tr>
           <th className="px-4 py-4">Tracking ID</th>
+          <th className="px-4 py-4">Type</th>
           <th className="px-4 py-4">Merchant</th>
           <th className="px-4 py-4">Customer</th>
           <th className="px-4 py-4">Rider</th>
@@ -62,6 +80,9 @@ export default function ShipmentTable({ shipments, onViewClick, onEditClick, onA
                 {shipment.id.replace(/-/g, '-\u200B')}
               </div>
               <div className="text-xs text-gray-400 mt-1">{shipment.date}</div>
+            </td>
+            <td className="px-4 py-4 align-top">
+                {getTypeBadge(shipment.type)}
             </td>
             <td className="px-4 py-4 align-top">
               <div className="font-medium text-gray-900">{shipment.merchant.name}</div>

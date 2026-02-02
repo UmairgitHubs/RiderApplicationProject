@@ -162,6 +162,7 @@ export const getAllShipments = asyncHandler(async (req: AuthRequest, res: Respon
     pickupAddress: s.pickup_address,
     deliveryAddress: s.delivery_address,
     priority: s.priority || 'Normal',
+    shipmentType: s.shipment_type,
   }));
 
   res.json({

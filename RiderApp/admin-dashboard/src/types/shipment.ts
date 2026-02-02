@@ -18,4 +18,5 @@ export interface Shipment {
   codAmount: number
   codStatus: string
   priority: string // or ShipmentPriority
+  type: 'Individual' | 'Franchise'
 }

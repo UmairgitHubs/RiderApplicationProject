@@ -40,6 +40,23 @@ API Endpoint definitions, matching controllers.
 - **Admin routes**: `admin.agent.routes.ts`, `admin.cms.routes.ts`, `admin.hub.routes.ts`, `admin.merchant.routes.ts`, `admin.routes.ts`, `admin.shipment.routes.ts`...
 - **Shared routes**: `auth.routes.ts`, `chat.routes.ts`, `shipment.routes.ts`, `wallet.routes.ts`, `profile.routes.ts`...
 
+### **`src/services/`**
+Business logic and external integrations.
+- `notification.service.ts`: Handles Push, Email, SMS.
+- `email.service.ts`, `sms.service.ts`, `twilio.service.ts`: Communication providers.
+- `route.service.ts`: Route optimization logic.
+- `firebase.service.ts`: Firebase integration.
+- `activity.service.ts`, `settings.service.ts`.
+
+### **`src/jobs/`**
+Scheduled tasks.
+- `weeklyReport.job.ts`: Generates weekly analytics.
+
+### **`src/middleware/`**
+Request processing middleware.
+- `auth.middleware.ts`, `admin.middleware.ts`: Authentication/Authorization.
+- `validation.middleware.ts`, `error.middleware.ts`, `async.middleware.ts`.
+
 ### **`src/`** root files
 - `app.ts`: Express app setup.
 - `server.ts`: Server entry point.
@@ -65,6 +82,23 @@ API Endpoint definitions, matching controllers.
 
 ### **`src/components/`**
 Reusable UI components.
+- `SafeView.tsx`, `SafeScrollView.tsx`
+
+### **`src/hooks/`**
+Custom React hooks for business logic.
+- `useNotifications.ts`, `useNotificationSettings.ts`
+- `useRiderDashboard.ts`, `useMerchantDashboard.ts`
+- `useShipments.ts`, `useRoutePlanning.ts`
+- `useVehicle.ts`, `useWorkingAreas.ts`
+
+### **`src/contexts/`**
+React Contexts for global state.
+- `LanguageContext.tsx`: Localization state.
+- `ThemeContext.tsx`: Theme management.
+
+### **`src/i18n/`**
+Internationalization configuration.
+- `config.ts`, `locales/` (en, ur).
 
 ---
 
@@ -75,18 +109,16 @@ Reusable UI components.
 ### **`src/app/`** (Next.js App Router)
 
 #### **Authentication & Public**
-- `login/`
-- `forgot-password/`
-- `reset-password/`
-- `verify-2fa/`
-- `verify-otp/`
+- `login/`, `forgot-password/`, `reset-password/`
+- `verify-2fa/`, `verify-otp/`
 
 #### **`(dashboard)` Protected Routes**
 - `dashboard/`: Analytics overview.
 - `agents/`: Support agents.
 - `cms/`: Content management.
 - `hubs/`: Hub management (List & Details).
-- `merchants/`: Merchant management (includes Orders sub-view).
+- `merchants/`: Merchant management.
+  - `[id]/orders/`: Merchant specific orders.
 - `riders/`: Rider management.
 - `shipments/`: Shipment tracking.
 - `routes/`: Route planning and management.
@@ -97,9 +129,18 @@ Reusable UI components.
 - `settings/`: Platform settings.
 - `profile/`: User profile.
 
+### **`src/components/`**
+Component library organized by feature.
+- `ui/`: Shared UI primitives (buttons, inputs, cards).
+- `layout/`: Sidebar, Header, Layout wrappers.
+- **Feature Components**:
+  - `agents/`, `cms/`, `dashboard/`, `hubs/`
+  - `merchants/`, `payments/`, `profile/`, `reports/`
+  - `riders/`, `routes/`, `shipments/`, `support/`, `wallets/`
+
 ### **`src/lib/`**
 - `api/`: Frontend API clients connecting to backend endpoints.
 
 ---
 
-*Last Updated: 2026-01-31*
+*Last Updated: 2026-02-02*

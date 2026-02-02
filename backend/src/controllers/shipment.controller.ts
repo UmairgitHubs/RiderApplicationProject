@@ -233,14 +233,25 @@ export const createShipment = async (req: Request, res: Response) => {
           const row = data[i];
           
           // Map Excel columns
-          const rowName = row['Name'] || row['Receiver Name'] || row['Recipient'] || 'Unknown Recipient';
-          const rowPhone = row['Phone'] || row['Mobile'] || row['Contact'] || recipientPhone; 
-          const rowAddress = row['Address'] || row['Location'] || row['Delivery Address'] || 'Unknown Address';
-          const rowCity = row['City'] || row['Town'] || row['District'] || recipientCity || null;
-          const rowType = row['Type'] || row['Package Type'] || packagesArray[0]?.packageType || 'Standard';
-          const rowWeight = row['Weight'] || row['kg'] || totalWeight || 1;
-          const rowCOD = row['COD'] || row['Amount'] || codAmount || 0;
-          const rowInstructions = row['Instructions'] || row['Notes'] || specialInstructions || null;
+          // Helper for case-insensitive property access
+          const getProp = (obj: any, targetKeys: string[]) => {
+            const keys = Object.keys(obj);
+            for (const target of targetKeys) {
+               const foundKey = keys.find(k => k.toLowerCase().trim() === target.toLowerCase().trim());
+               if (foundKey) return obj[foundKey];
+            }
+            return undefined;
+          };
+
+          // Map Excel columns with flexible matching
+          const rowName = getProp(row, ['Name', 'Receiver Name', 'Recipient', 'Customer', 'Customer Name']) || 'Unknown Recipient';
+          const rowPhone = getProp(row, ['Phone', 'Mobile', 'Contact', 'Cell', 'Phone Number', 'Mobile Number']) || recipientPhone; 
+          const rowAddress = getProp(row, ['Address', 'Location', 'Delivery Address', 'Street Address']) || 'Unknown Address';
+          const rowCity = getProp(row, ['City', 'Town', 'District']) || recipientCity || null;
+          const rowType = getProp(row, ['Type', 'Package Type', 'Item Type']) || packagesArray[0]?.packageType || 'Standard';
+          const rowWeight = getProp(row, ['Weight', 'kg', 'Weight (kg)', 'Mass']) || totalWeight || 1;
+          const rowCOD = getProp(row, ['COD', 'Amount', 'COD Amount', 'Cash', 'Cash on Delivery', 'Price', 'Value', 'Collection Amount']) || codAmount || 0;
+          const rowInstructions = getProp(row, ['Instructions', 'Notes', 'Special Instructions', 'Remarks']) || specialInstructions || null;
 
           if (i === 0) {
               // --- ROW 0: UPDATE MAIN SHIPMENT ---
