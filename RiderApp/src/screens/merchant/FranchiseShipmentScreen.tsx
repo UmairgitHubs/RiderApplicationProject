@@ -248,11 +248,19 @@ export default function FranchiseShipmentScreen({ navigation, route }: any) {
           parent.navigate('ShipmentSuccess', {
             trackingNumber: trackingNumber,
             shipmentType: 'franchise',
+            recipientName: receiverName,
+            recipientPhone: phoneNumber,
+            senderName: pickupAddress.businessName,
+            senderPhone: pickupAddress.phone,
           });
         } else {
           navigation.navigate('ShipmentSuccess', {
             trackingNumber: trackingNumber,
             shipmentType: 'franchise',
+            recipientName: receiverName,
+            recipientPhone: phoneNumber,
+            senderName: pickupAddress.businessName,
+            senderPhone: pickupAddress.phone,
           });
         }
       } else {

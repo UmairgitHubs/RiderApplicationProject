@@ -68,9 +68,9 @@ export const useMerchantDashboard = () => {
   }, []);
 
   // Derived state from query data
-  const activeShipment = shipmentsData.find((s: any) => 
-    ['in_transit', 'picked_up', 'assigned'].includes(s.status) && !(s.batchId || s.batch_id) // Prioritize individual active
-  ) || null;
+  const activeShipments = (shipmentsData.filter((s: any) => 
+    ['in_transit', 'picked_up', 'assigned'].includes(s.status) && !(s.batchId || s.batch_id)
+  ) || []).slice(0, 5);
 
   // Group by Batch ID for Franchise Orders
   const franchiseOrders = shipmentsData.reduce((acc: any, curr: any) => {
@@ -102,14 +102,14 @@ export const useMerchantDashboard = () => {
   const recentShipments = shipmentsData
     .filter((s: any) => {
       const isFranchise = s.batchId || s.batch_id;
-      const isActiveTracking = activeShipment && s.id === activeShipment.id;
+      const isActiveTracking = activeShipments.some((active: any) => active.id === s.id);
       return !isFranchise && !isActiveTracking;
     })
     .slice(0, 5);
 
   return {
     stats: stats as DashboardStats,
-    activeShipment: activeShipment as Shipment | null,
+    activeShipments: activeShipments as Shipment[],
     activeBulkOrders: activeBulkOrders as any[],
     recentShipments: recentShipments as Shipment[],
     loading: statsLoading || shipmentsLoading,

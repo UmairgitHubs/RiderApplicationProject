@@ -56,14 +56,17 @@ export default function OrderDetailsChart({ data, month, year, onDateChange, isL
         <LineChart data={data}>
           <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
           <XAxis dataKey="day" stroke="#9ca3af" />
-          <YAxis tickFormatter={(value) => `${value}%`} stroke="#9ca3af" />
-          <Tooltip />
+          <YAxis tickFormatter={(value) => `${value}`} stroke="#9ca3af" />
+          <Tooltip 
+            contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+            labelStyle={{ color: '#6b7280' }}
+          />
           <Line 
             type="monotone" 
-            dataKey="percentage" 
+            dataKey="count" 
             stroke="#FF6B00" 
             strokeWidth={2}
-            dot={{ fill: '#2196F3', r: 4 }}
+            dot={{ fill: '#FF6B00', r: 4 }}
             activeDot={{ r: 6 }}
           />
         </LineChart>

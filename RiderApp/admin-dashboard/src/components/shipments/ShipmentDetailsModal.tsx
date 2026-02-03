@@ -9,7 +9,7 @@ import { adminShipmentsApi } from '@/lib/api';
 import { toast } from 'sonner';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import ShipmentChat from './ShipmentChat';
+
 
 interface ShipmentDetailsModalProps {
   shipment: Shipment | null;
@@ -21,31 +21,13 @@ interface ShipmentDetailsModalProps {
 export default function ShipmentDetailsModal({ shipment, isOpen, onClose, onEdit }: ShipmentDetailsModalProps) {
   const [isAddNoteOpen, setIsAddNoteOpen] = useState(false);
   const [noteText, setNoteText] = useState('');
-  const [activeTab, setActiveTab] = useState<'details' | 'chat'>('details');
   const queryClient = useQueryClient();
-
-  // Reset tab on open
-  React.useEffect(() => {
-    if (isOpen) setActiveTab('details');
-  }, [isOpen]);
 
   const { data: shipmentData, isLoading } = useQuery({
     queryKey: ['shipment', shipment?.id],
     queryFn: () => adminShipmentsApi.getById(shipment?.id!),
     enabled: !!shipment?.id && isOpen,
   });
-
-  const currentUser = useMemo(() => {
-       if (typeof window === 'undefined') return { id: '', role: 'admin', name: 'Admin' };
-       try {
-           const str = localStorage.getItem('user');
-           if (str) {
-               const parsed = JSON.parse(str);
-               return { id: parsed.id, role: parsed.role, name: parsed.full_name || parsed.fullName || 'User' };
-           }
-       } catch (e) { console.error('Error parsing user', e); }
-       return { id: 'admin-fallback', role: 'admin', name: 'Admin' };
-  }, []);
 
   const addNoteMutation = useMutation({
     mutationFn: (note: string) => adminShipmentsApi.addNote(shipment!.id, note),
@@ -416,21 +398,7 @@ export default function ShipmentDetailsModal({ shipment, isOpen, onClose, onEdit
               <p className="text-sm font-medium text-orange-500 mt-1">{id}</p>
             </div>
             
-            <div className="flex bg-gray-100 rounded-lg p-1 mx-4">
-                <button 
-                    onClick={() => setActiveTab('details')}
-                    className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${activeTab === 'details' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-                >
-                    Details
-                </button>
-                <button 
-                    onClick={() => setActiveTab('chat')}
-                    className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${activeTab === 'chat' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-                >
-                    <MessageSquare className="w-4 h-4" />
-                    Chat
-                </button>
-            </div>
+
 
             <button 
               onClick={onClose}
@@ -463,14 +431,6 @@ export default function ShipmentDetailsModal({ shipment, isOpen, onClose, onEdit
                 <div className="flex justify-center py-12">
                      <Loader2 className="w-8 h-8 animate-spin text-orange-500" />
                 </div>
-            ) : activeTab === 'chat' ? (
-                // CHAT TAB CONTENT
-                <ShipmentChat 
-                    shipmentId={id} 
-                    merchantId={d.merchant?.id || d.merchant_id} 
-                    riderId={d.rider?.id || d.rider_id} 
-                    currentUser={currentUser} 
-                />
             ) : (
              <>
                 {/* DETAILS TAB CONTENT */}

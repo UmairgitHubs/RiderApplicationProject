@@ -46,7 +46,7 @@ export default function MerchantHome() {
   
   const { 
     stats, 
-    activeShipment, 
+    activeShipments, 
     activeBulkOrders, // Now available as array
     recentShipments, 
     loading, 
@@ -154,52 +154,55 @@ export default function MerchantHome() {
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={colors.primary} />
           </View>
-        ) : activeShipment ? (
+        ) : activeShipments?.length > 0 ? (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>{t('home.liveTracking')}</Text>
               <View style={styles.badge}>
-                <Text style={styles.badgeText}>1 Active</Text>
+                <Text style={styles.badgeText}>{activeShipments.length} Active</Text>
               </View>
             </View>
-            <View style={styles.trackingCard}>
-              <View style={styles.trackingHeader}>
-                <Ionicons name="paper-plane-outline" size={20} color={colors.primary} />
-                <Text style={styles.trackingId}>{activeShipment.trackingNumber}</Text>
-                <View style={[styles.statusBadge, { backgroundColor: getStatusInfo(activeShipment.status).color }]}>
-                  <Text style={styles.statusBadgeText}>{getStatusInfo(activeShipment.status).label}</Text>
-                </View>
-              </View>
-              <Text style={styles.trackingRecipient}>To: {activeShipment.recipientName}</Text>
-              
-              {activeShipment.rider && (
-                <View style={styles.riderInfo}>
-                  <View style={styles.riderAvatar}>
-                    <Text style={styles.riderInitial}>{getRiderInitial(activeShipment.rider)}</Text>
-                  </View>
-                  <View style={styles.riderDetails}>
-                    <Text style={styles.riderName}>{activeShipment.rider.full_name || 'Rider'}</Text>
-                    <Text style={styles.riderSubtitle}>Your rider • 8 min away</Text>
+            
+            {activeShipments.map((shipment: any) => (
+              <View key={shipment.id} style={[styles.trackingCard, { marginBottom: 16 }]}>
+                <View style={styles.trackingHeader}>
+                  <Ionicons name="paper-plane-outline" size={20} color={colors.primary} />
+                  <Text style={styles.trackingId}>{shipment.trackingNumber}</Text>
+                  <View style={[styles.statusBadge, { backgroundColor: getStatusInfo(shipment.status).color }]}>
+                    <Text style={styles.statusBadgeText}>{getStatusInfo(shipment.status).label}</Text>
                   </View>
                 </View>
-              )}
-              
-              <View style={styles.addressRow}>
-                <Ionicons name="location" size={16} color={colors.error} />
-                <Text style={styles.address} numberOfLines={1}>{activeShipment.deliveryAddress}</Text>
+                <Text style={styles.trackingRecipient}>To: {shipment.recipientName}</Text>
+                
+                {shipment.rider && (
+                  <View style={styles.riderInfo}>
+                    <View style={styles.riderAvatar}>
+                      <Text style={styles.riderInitial}>{getRiderInitial(shipment.rider)}</Text>
+                    </View>
+                    <View style={styles.riderDetails}>
+                      <Text style={styles.riderName}>{shipment.rider.full_name || 'Rider'}</Text>
+                      <Text style={styles.riderSubtitle}>Your rider • On the way</Text>
+                    </View>
+                  </View>
+                )}
+                
+                <View style={styles.addressRow}>
+                  <Ionicons name="location" size={16} color={colors.error} />
+                  <Text style={styles.address} numberOfLines={1}>{shipment.deliveryAddress}</Text>
+                </View>
+                
+                <TouchableOpacity 
+                  style={styles.trackButton}
+                  onPress={() => {
+                    const parent = navigation.getParent();
+                    if (parent) parent.navigate('ShipmentTracking', { shipmentId: shipment.id });
+                  }}
+                >
+                  <Ionicons name="map-outline" size={16} color={colors.textWhite} />
+                  <Text style={styles.trackButtonText}>{t('home.trackOnMap')}</Text>
+                </TouchableOpacity>
               </View>
-              
-              <TouchableOpacity 
-                style={styles.trackButton}
-                onPress={() => {
-                  const parent = navigation.getParent();
-                  if (parent) parent.navigate('ShipmentTracking', { shipmentId: activeShipment.id });
-                }}
-              >
-                <Ionicons name="map-outline" size={16} color={colors.textWhite} />
-                <Text style={styles.trackButtonText}>{t('home.trackOnMap')}</Text>
-              </TouchableOpacity>
-            </View>
+            ))}
           </View>
         ) : null}
 

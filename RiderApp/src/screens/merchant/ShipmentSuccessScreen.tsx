@@ -16,10 +16,19 @@ import QRCode from 'react-native-qrcode-svg';
 import { colors, typography, spacing, borderRadius } from '../../theme';
 import * as MediaLibrary from 'expo-media-library';
 import { captureRef } from 'react-native-view-shot';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
 
 export default function ShipmentSuccessScreen({ navigation, route }: any) {
   const insets = useSafeAreaInsets();
-  const { trackingNumber, shipmentType } = route.params || {};
+  const { 
+    trackingNumber, 
+    shipmentType,
+    recipientName,
+    recipientPhone,
+    senderName,
+    senderPhone
+  } = route.params || {};
   const qrCodeRef = useRef<any>(null);
 
   const shipmentTypeText = shipmentType === 'franchise' ? 'franchise' : 'individual';
@@ -60,22 +69,82 @@ export default function ShipmentSuccessScreen({ navigation, route }: any) {
     }
   };
 
-  const handlePrintLabel = () => {
-    // For now, show an alert. In production, integrate with a printing service
-    Alert.alert(
-      'Print Label',
-      'Print functionality will be available soon. You can download the QR code and print it manually.',
-      [
-        {
-          text: 'Download QR Code Instead',
-          onPress: handleDownloadQRCode,
-        },
-        {
-          text: 'OK',
-          style: 'cancel',
-        },
-      ]
-    );
+  const handlePrintLabel = async () => {
+    try {
+      if (!qrCodeRef.current) return;
+
+      const qrBase64 = await captureRef(qrCodeRef.current, {
+        format: 'png',
+        result: 'base64',
+        quality: 1,
+      });
+
+      const html = `
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
+    <style>
+      body { margin: 0; padding: 20px; font-family: Helvetica, sans-serif; text-align: center; }
+      .label-container {
+        border: 2px solid #000;
+        padding: 30px;
+        max-width: 500px;
+        margin: 0 auto;
+        border-radius: 12px;
+      }
+      .header { font-size: 24px; font-weight: bold; margin-bottom: 5px; text-transform: uppercase; letter-spacing: 1px; }
+      .sub-header { font-size: 14px; color: #555; margin-bottom: 20px; border-bottom: 2px dashed #ccc; padding-bottom: 20px; }
+      .qr-code { width: 220px; height: 220px; margin: 10px auto; display: block; }
+      .tracking-number {
+        font-size: 26px; font-weight: 900; letter-spacing: 2px; margin: 25px 0; font-family: monospace;
+        background: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #eee;
+      }
+      .details-grid { display: flex; text-align: left; margin-top: 30px; border-top: 2px dashed #ccc; padding-top: 25px; gap: 20px; }
+      .col { flex: 1; padding: 10px; background: #fdfdfd; border-radius: 8px; }
+      .col-title { font-weight: bold; color: #666; text-transform: uppercase; font-size: 11px; marginBottom: 5px; }
+      .value { font-size: 14px; color: #000; font-weight: 500; }
+      .footer { margin-top: 40px; font-size: 11px; color: #999; border-top: 1px solid #eee; padding-top: 15px; }
+    </style>
+  </head>
+  <body>
+    <div class="label-container">
+      <div class="header">Shipment Label</div>
+      <div class="sub-header">${new Date().toLocaleDateString()}</div>
+      
+      <img src="data:image/png;base64,${qrBase64}" class="qr-code" />
+      
+      <div class="tracking-number">${trackingNumber || ''}</div>
+      
+      <div class="details-grid">
+        <div class="col">
+          <div class="col-title">Sender</div>
+          <div class="value"><strong>${senderName || 'Merchant'}</strong></div>
+          <div class="value">${senderPhone || ''}</div>
+        </div>
+        <div class="col">
+          <div class="col-title">Recipient</div>
+          <div class="value"><strong>${recipientName || 'Customer'}</strong></div>
+          <div class="value">${recipientPhone || ''}</div>
+        </div>
+      </div>
+
+      <div class="footer">
+        Scan this label to track shipment • Powered by Zimli
+      </div>
+    </div>
+  </body>
+</html>
+      `;
+
+      await Print.printAsync({
+        html,
+      });
+
+    } catch (error) {
+      console.error(error);
+      Alert.alert('Error', 'Failed to generate print label');
+    }
   };
 
   const handleShareTracking = async () => {

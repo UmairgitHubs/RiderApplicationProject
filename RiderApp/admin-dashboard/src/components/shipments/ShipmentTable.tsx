@@ -54,18 +54,18 @@ export default function ShipmentTable({ shipments, onViewClick, onEditClick, onA
   
   return (
     <table className="w-full text-sm text-left">
-      <thead className="bg-gray-50 text-gray-700 font-semibold border-b border-gray-100">
+      <thead className="bg-gray-50 text-gray-700 font-semibold border-b border-gray-100 whitespace-nowrap">
         <tr>
-          <th className="px-4 py-4">Tracking ID</th>
-          <th className="px-4 py-4">Type</th>
-          <th className="px-4 py-4">Merchant</th>
-          <th className="px-4 py-4">Customer</th>
-          <th className="px-4 py-4">Rider</th>
-          <th className="px-4 py-4">Hub</th>
-          <th className="px-4 py-4">Status</th>
-          <th className="px-4 py-4">COD Amount</th>
-          <th className="px-4 py-4">Priority</th>
-          <th className="px-4 py-4">Actions</th>
+          <th className="px-3 py-3">Tracking ID</th>
+          <th className="px-3 py-3">Type</th>
+          <th className="px-3 py-3">Merchant</th>
+          <th className="px-3 py-3">Customer</th>
+          <th className="px-3 py-3">Rider</th>
+          <th className="px-3 py-3">Hub</th>
+          <th className="px-3 py-3">Status</th>
+          <th className="px-3 py-3">COD Amount</th>
+          <th className="px-3 py-3">Priority</th>
+          <th className="px-3 py-3">Actions</th>
         </tr>
       </thead>
       <tbody className="divide-y divide-gray-100">
@@ -75,24 +75,24 @@ export default function ShipmentTable({ shipments, onViewClick, onEditClick, onA
             className="hover:bg-gray-50 transition-colors cursor-pointer group"
             onClick={() => onViewClick(shipment)}
           >
-            <td className="px-4 py-4 align-top">
+            <td className="px-3 py-3 align-top">
               <div className="font-bold text-primary w-24 leading-snug break-words group-hover:underline">
                 {shipment.id.replace(/-/g, '-\u200B')}
               </div>
               <div className="text-xs text-gray-400 mt-1">{shipment.date}</div>
             </td>
-            <td className="px-4 py-4 align-top">
+            <td className="px-3 py-3 align-top">
                 {getTypeBadge(shipment.type)}
             </td>
-            <td className="px-4 py-4 align-top">
-              <div className="font-medium text-gray-900">{shipment.merchant.name}</div>
+            <td className="px-3 py-3 align-top">
+              <div className="font-medium text-gray-900 truncate max-w-[120px]" title={shipment.merchant.name}>{shipment.merchant.name}</div>
               <div className="text-xs text-gray-500">{shipment.merchant.code}</div>
             </td>
-            <td className="px-4 py-4 align-top">
-              <div className="font-medium text-gray-900">{shipment.customer.name}</div>
-              <div className="text-xs text-gray-500">{shipment.customer.address}</div>
+            <td className="px-3 py-3 align-top">
+              <div className="font-medium text-gray-900 truncate max-w-[120px]" title={shipment.customer.name}>{shipment.customer.name}</div>
+              <div className="text-xs text-gray-500 truncate max-w-[150px]" title={shipment.customer.address}>{shipment.customer.address}</div>
             </td>
-            <td className="px-4 py-4 align-top">
+            <td className="px-3 py-3 align-top">
               <div className="flex items-center">
                 {shipment.rider === 'Unassigned' || !shipment.rider ? (
                   <span className="text-gray-400 italic">Unassigned</span>
@@ -101,26 +101,26 @@ export default function ShipmentTable({ shipments, onViewClick, onEditClick, onA
                 )}
               </div>
             </td>
-            <td className="px-4 py-4 align-top">
+            <td className="px-3 py-3 align-top">
               <div className="text-gray-700">
                 {shipment.hub}
               </div>
             </td>
-            <td className="px-4 py-4 align-top">
+            <td className="px-3 py-3 align-top">
               <div className={`px-3 py-1.5 rounded-full text-xs font-semibold text-center w-fit whitespace-nowrap ${getStatusColor(shipment.status)}`}>
                 {shipment.status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
               </div>
             </td>
-            <td className="px-4 py-4 align-top">
+            <td className="px-3 py-3 align-top">
               <div className="font-bold text-gray-900">${shipment.codAmount?.toFixed(2) || '0.00'}</div>
               <div className="text-xs text-gray-500">{shipment.codStatus}</div>
             </td>
-            <td className="px-4 py-4 align-top">
+            <td className="px-3 py-3 align-top">
               <span className={`inline-flex px-2.5 py-0.5 rounded text-xs font-medium ${getPriorityColor(shipment.priority)}`}>
                 {shipment.priority}
               </span>
             </td>
-            <td className="px-4 py-4 align-top" onClick={(e) => e.stopPropagation()}>
+            <td className="px-3 py-3 align-top" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center gap-2">
                 <button 
                   onClick={(e) => {

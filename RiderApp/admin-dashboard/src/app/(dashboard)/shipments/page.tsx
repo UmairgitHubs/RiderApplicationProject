@@ -344,7 +344,7 @@ export default function ShipmentsPage() {
             onChange={(e) => handleSearch(e.target.value)}
           />
         </div>
-        <div className="grid grid-cols-3 gap-4 md:w-[400px]">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 md:w-[400px] w-full">
           <select 
             className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 focus:outline-none focus:border-primary"
             onChange={(e) => handleDateChange(e.target.value)}
@@ -407,7 +407,7 @@ export default function ShipmentsPage() {
           </div>
 
           <div className="hidden md:block bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
                <ShipmentTable 
                   shipments={shipments} 
                   onViewClick={handleViewShipment} 

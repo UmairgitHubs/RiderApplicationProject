@@ -183,11 +183,19 @@ export default function IndividualShipmentScreen({ navigation, route }: any) {
           parent.navigate('ShipmentSuccess', {
             trackingNumber: trackingNumber,
             shipmentType: 'individual',
+            recipientName: receiverName,
+            recipientPhone: phoneNumber,
+            senderName: pickupAddress.label,
+            senderPhone: pickupAddress.phone,
           });
         } else {
           navigation.navigate('ShipmentSuccess', {
             trackingNumber: trackingNumber,
             shipmentType: 'individual',
+            recipientName: receiverName,
+            recipientPhone: phoneNumber,
+            senderName: pickupAddress.label,
+            senderPhone: pickupAddress.phone,
           });
         }
       } else {

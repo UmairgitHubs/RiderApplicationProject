@@ -100,7 +100,13 @@ export default function ChatScreen() {
         const userData = await AsyncStorage.getItem('@user_data');
         if (userData) {
           const user = JSON.parse(userData);
-          setCurrentUserId(user.id);
+          // Handle various possible ID fields to be robust
+          const id = user.id || user._id || user.userId || user.User_id;
+          if (id) {
+             setCurrentUserId(String(id));
+          } else {
+             console.error('User ID not found in stored data:', user);
+          }
         }
       } catch (e) {
         console.error('Failed to load user', e);
@@ -143,16 +149,7 @@ export default function ChatScreen() {
             const currentId = currentUserId; 
             
             // DEBUG: Log first message comparison to catch mismatches
-            if (response.data.length > 0 && currentId) {
-                const first = response.data[0];
-                const sId = first.senderId || first.sender_id;
-                console.log('🔍 Message Fetch Debug:', { 
-                    firstMsgId: first.id,
-                    senderId: sId,
-                    myId: currentId,
-                    match: isSameUser(sId, currentId)
-                });
-            }
+            // Process messages
 
             const formatted: Message[] = response.data.map((m: any) => {
               const sId = m.senderId || m.sender_id;
@@ -185,9 +182,11 @@ export default function ChatScreen() {
 
   // Initial Load + Polling
   useEffect(() => {
-    fetchMessages();
-    const interval = setInterval(fetchMessages, 10000); // Poll every 10s
-    return () => clearInterval(interval);
+    if (shipmentId && currentUserId) {
+      fetchMessages();
+      const interval = setInterval(fetchMessages, 10000); // Poll every 10s
+      return () => clearInterval(interval);
+    }
   }, [shipmentId, currentUserId]);
 
   // Keep ref in sync for socket callbacks

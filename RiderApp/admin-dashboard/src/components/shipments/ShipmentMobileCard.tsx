@@ -1,4 +1,4 @@
-import { Eye, Edit2, Share2 } from 'lucide-react'
+import { Eye, Edit2, Share2, Building2, User } from 'lucide-react'
 import { Shipment } from '@/types/shipment'
 
 interface ShipmentMobileCardProps {
@@ -36,6 +36,23 @@ export default function ShipmentMobileCard({ shipment, onViewClick, onEditClick 
     }
   }
 
+  const getTypeBadge = (type: 'Individual' | 'Franchise') => {
+      if (type === 'Franchise') {
+          return (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-600 border border-indigo-100">
+                  <Building2 className="w-3 h-3" />
+                  Franchise
+              </span>
+          )
+      }
+      return (
+            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-50 text-gray-600 border border-gray-100">
+                <User className="w-3 h-3" />
+                Individual
+            </span>
+      )
+  }
+
   return (
     <div 
       className="bg-white rounded-xl shadow-sm p-4 space-y-4 cursor-pointer group"
@@ -44,11 +61,15 @@ export default function ShipmentMobileCard({ shipment, onViewClick, onEditClick 
       <div className="flex justify-between items-start">
         <div>
           <div className="font-semibold text-primary group-hover:underline">{shipment.id.slice(0, 15)}...</div>
-          <div className="text-xs text-primary-400 mt-1">{shipment.id.slice(-4)}</div>
-          <div className="text-xs text-gray-400 mt-0.5">{shipment.date}</div>
+           <div className="flex gap-2 items-center mt-1">
+             <div className="text-xs text-gray-400">{shipment.date}</div>
+           </div>
+           <div className="mt-2">
+             {getTypeBadge(shipment.type)}
+           </div>
         </div>
         <span className={`inline-flex px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(shipment.status)}`}>
-          {shipment.status}
+          {shipment.status.replace(/_/g, ' ')}
         </span>
       </div>
       

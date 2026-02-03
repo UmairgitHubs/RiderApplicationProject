@@ -131,16 +131,16 @@ export default function DashboardPage() {
                   stroke="#9ca3af"
                 />
                 <YAxis 
-                  tickFormatter={(value) => `${value}%`}
+                  tickFormatter={(value) => `${value}`}
                   stroke="#9ca3af"
                 />
                 <Tooltip />
                 <Line 
                   type="monotone" 
-                  dataKey="percentage" 
+                  dataKey="count" 
                   stroke="#FF6B00" 
                   strokeWidth={2}
-                  dot={{ fill: '#2196F3', r: 4 }}
+                  dot={{ fill: '#FF6B00', r: 4 }}
                   activeDot={{ r: 6 }}
                 />
               </LineChart>
