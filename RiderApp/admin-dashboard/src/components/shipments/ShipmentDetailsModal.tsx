@@ -522,9 +522,13 @@ export default function ShipmentDetailsModal({ shipment, isOpen, onClose, onEdit
                             <span className="text-gray-500">Delivery Fee</span>
                             <span className="font-medium text-gray-900">{formatCurrency(d.delivery_fee)}</span>
                         </div>
+                        <div className="flex justify-between text-sm">
+                            <span className="text-gray-500">Pickup Fee</span>
+                            <span className="font-medium text-gray-900">{formatCurrency(d.pickup_fee || 0)}</span>
+                        </div>
                         <div className="pt-2 border-t border-gray-200 flex justify-between items-center mt-2">
                             <span className="font-bold text-gray-700">Total Amount</span>
-                            <span className="font-bold text-orange-500 text-lg">{formatCurrency(Number(d.cod_amount || 0) + Number(d.delivery_fee || 0))}</span>
+                            <span className="font-bold text-orange-500 text-lg">{formatCurrency(Number(d.cod_amount || 0) + Number(d.delivery_fee || 0) + Number(d.pickup_fee || 0))}</span>
                         </div>
                         <div className="flex justify-between items-center text-sm pt-1">
                             <span className="text-gray-500">Payment Status</span>

@@ -205,14 +205,6 @@ export default function CreateRouteModal({ isOpen, onClose, routeId }: CreateRou
           longitude: shipment.pickup_longitude,
           order: nextOrderIndex
         });
-        append({
-          shipmentId: shipment.id,
-          type: 'delivery',
-          location: currentHub?.address || currentHub?.name || 'Hub Location',
-          latitude: currentHub?.latitude,
-          longitude: currentHub?.longitude,
-          order: nextOrderIndex + 1
-        });
       } else if (shipment.status === 'received_at_hub') {
         // Hub -> Customer
         append({

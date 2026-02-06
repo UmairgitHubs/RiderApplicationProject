@@ -1,28 +1,36 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  ActivityIndicator,
   Platform,
   Linking,
-  ActivityIndicator,
+  Dimensions
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors, typography, spacing, borderRadius } from '../../theme';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { shipmentApi } from '../../services/api';
+import { colors, typography, spacing, borderRadius } from '../../theme';
 
-// Custom purple theme colors matching the design image
-const purpleTheme = {
-  primary: '#8A2BE2', // BlueViolet
-  light: '#F3E5F5', // Light Purple bg
-  text: '#6A1B9A', // Darker purple text
-  accent: '#E1BEE7', // Light purple accent
+// Theme Colors from design
+const THEME = {
+  headerOrange: '#F26E21',
+  purple: '#8A2BE2',
+  purpleLight: '#F3E5F5',
+  bg: '#F5F5F5',
+  text: '#1A1A1A',
+  textSecondary: '#757575',
+  success: '#E8F5E9',
+  successText: '#4CAF50',
+  btnLightOrange: '#FFF3E0',
+  btnOrangeText: '#FF9800'
 };
 
+const { width } = Dimensions.get('window');
 
 export default function FranchiseOrderDetailsScreen() {
   const navigation = useNavigation();
@@ -30,15 +38,20 @@ export default function FranchiseOrderDetailsScreen() {
   const insets = useSafeAreaInsets();
   const { shipment } = (route.params as any) || {};
 
-  // Mock data matching the image if real data isn't full yet
-  const orderId = shipment?.trackingNumber || 'FR2024009876543';
-  const itemCount = shipment?.packageCount || 6;
-  const status = 'Out for Delivery'; // Or shipment?.status
+  // If shipment is passed directly, use it. Otherwise use route params if available.
+  // Ideally, 'shipment' here represents the "Batch" object or a representative shipment.
+  
+  const orderId = shipment?.batchId || shipment?.trackingNumber || 'FR-BATCH-001';
+  
+  const [loading, setLoading] = useState(true);
+  const [shipmentsList, setShipmentsList] = useState<any[]>([]);
+  const [batchStats, setBatchStats] = useState({
+      totalPrice: 0,
+      totalItems: 0,
+      status: 'Processing'
+  });
 
-  const [loading, setLoading] = React.useState(true);
-  const [shipmentsList, setShipmentsList] = React.useState<any[]>([]);
-
-  React.useEffect(() => {
+  useEffect(() => {
     fetchBatchShipments();
   }, [orderId]);
 
@@ -46,11 +59,21 @@ export default function FranchiseOrderDetailsScreen() {
       try {
           if (!orderId) return;
           setLoading(true);
-          // Assuming orderId passed is the batchId (which is the case from MerchantHome)
-          // We cast params to any to allow batchId which we just added to backend
           const response = await shipmentApi.getAll({ batchId: orderId } as any) as any;
+          
           if (response.success && response.data?.shipments) {
-              setShipmentsList(response.data.shipments);
+              const list = response.data.shipments;
+              setShipmentsList(list);
+              
+              // Calculate stats
+              const total = list.reduce((sum: number, item: any) => sum + (Number(item.deliveryFee) || 0), 0);
+              const currentStatus = list.length > 0 ? list[0].status : 'pending';
+              
+              setBatchStats({
+                  totalPrice: total,
+                  totalItems: list.length || shipment?.packageCount || 0,
+                  status: currentStatus
+              });
           }
       } catch (error) {
           console.error("Failed to fetch batch shipments", error);
@@ -59,167 +82,230 @@ export default function FranchiseOrderDetailsScreen() {
       }
   };
 
-  const getStatusInfo = (status: string) => {
-    const statusMap: { [key: string]: { label: string; color: string; bg: string } } = {
-      pending: { label: 'Pending Pickup', color: '#FF9800', bg: '#FFF3E0' },
-      assigned: { label: 'Assigned', color: '#03A9F4', bg: '#E1F5FE' },
-      picked_up: { label: 'Picked Up', color: '#9C27B0', bg: '#F3E5F5' },
-      in_transit: { label: 'In Transit', color: '#9C27B0', bg: '#F3E5F5' },
-      delivered: { label: 'Delivered', color: '#4CAF50', bg: '#E8F5E9' },
-      cancelled: { label: 'Cancelled', color: '#F44336', bg: '#FFEBEE' },
-      returned: { label: 'Returned', color: '#F44336', bg: '#FFEBEE' },
-    };
-    return statusMap[status] || { label: status, color: '#757575', bg: '#EEEEEE' };
+  const getLogisticsInfo = () => {
+      // Derive logistics info from the first shipment that has it
+      const shipmentWithRider = shipmentsList.find(s => s.rider);
+      const shipmentWithHub = shipmentsList.find(s => s.hub);
+
+      return {
+          hubAddress: shipmentWithHub?.hub?.address || 'Pending Hub Assignment',
+          hubCity: shipmentWithHub?.hub?.city || 'Distribution Center',
+          riderName: shipmentWithRider?.rider?.full_name || 'Waiting for Rider...',
+          vehicleType: shipmentWithRider?.rider?.vehicle_type || '---',
+          vehiclePlate: shipmentWithRider?.rider?.vehicle_number || '---'
+      };
   };
 
-  const currentStatus = shipmentsList.length > 0 ? shipmentsList[0].status : (shipment?.status || 'pending');
-  const statusInfo = getStatusInfo(currentStatus);
+  const logistics = getLogisticsInfo();
+
+  // Helper for status badge
+  const getStatusBadge = (status: string) => {
+      const isDelivered = status === 'delivered';
+      const isOut = status === 'in_transit' || status === 'out_for_delivery';
+      
+      return {
+          bg: isDelivered ? '#E8F5E9' : isOut ? '#E3F2FD' : '#FFF3E0',
+          color: isDelivered ? '#2E7D32' : isOut ? '#1976D2' : '#F57C00',
+          label: status.replace('_', ' ').toUpperCase()
+      };
+  };
+
+  const batchStatus = getStatusBadge(batchStats.status);
 
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + (Platform.OS === 'ios' ? 10 : 20) }]}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Franchise Bulk Order</Text>
-        <View style={[styles.activeBadge, { backgroundColor: statusInfo.bg }]}>
-          <Text style={[styles.activeBadgeText, { color: statusInfo.color }]}>{statusInfo.label}</Text>
+      {/* Orange Header */}
+      {/* Orange Header */}
+      <View style={[styles.header, { paddingTop: insets.top }]}>
+        <View style={styles.headerTopRow}>
+            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+                 <Ionicons name="arrow-back" size={24} color="white" />
+            </TouchableOpacity>
+            <View style={styles.headerTitleContainer}>
+                <Text style={styles.headerTitle}>Franchise Bulk Order</Text>
+                <Text style={styles.headerSubtitle}>Total {batchStats.totalItems} Orders</Text>
+            </View>
+            <View style={{ width: 40 }} /> 
         </View>
       </View>
 
       <ScrollView 
-        style={styles.scrollView}
+        style={styles.content}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Main Card */}
-        <View style={styles.mainCard}>
-          <View style={styles.cardHeader}>
-             <View style={styles.iconContainer}>
-               <Ionicons name="business" size={24} color="white" />
-             </View>
-             <View>
-               <Text style={styles.cardTitle}>Bulk Franchise Order</Text>
-               <Text style={styles.cardSubtitle}>Multiple customers • Hub routed</Text>
-             </View>
+          {/* Main Summary Card */}
+          <View style={styles.mainCard}>
+              <View style={styles.cardHeader}>
+                  <View style={styles.iconBox}>
+                      <Ionicons name="business" size={24} color="white" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                      <Text style={styles.cardTitle}>Bulk Franchise Order</Text>
+                      <Text style={styles.cardSubtitle}>Key handling Required</Text>
+                  </View>
+                  <View style={[styles.statusBadge, { backgroundColor: batchStatus.bg }]}>
+                      <Text style={[styles.statusText, { color: batchStatus.color }]}>{batchStatus.label}</Text>
+                  </View>
+              </View>
+
+              <View style={styles.divider} />
+
+              <View style={styles.batchInfoRow}>
+                  <View>
+                      <Text style={styles.batchLabel}>Batch Track ID</Text>
+                      <Text style={styles.batchValue}>{orderId}</Text>
+                  </View>
+              </View>
+              <Text style={styles.itemCount}>
+                  {batchStats.totalItems} parcels • {batchStats.totalItems} different locations
+              </Text>
+
+              <View style={styles.infoBanner}>
+                   <Ionicons name="time-outline" size={16} color="#E65100" />
+                   <Text style={styles.infoBannerText}>
+                       All orders currently out for delivery
+                   </Text>
+              </View>
           </View>
 
-          {/* Order ID Section */}
-          <View style={styles.orderIdContainer}>
-             <View>
-                 <Text style={styles.label}>Franchise Order ID</Text>
-                 <Text style={styles.orderId}>{orderId}</Text>
-                 <Text style={styles.itemCount}>{shipmentsList.length || itemCount} pieces • {shipmentsList.length || itemCount} different customers</Text>
-             </View>
-             <View style={[styles.statusBadge, { backgroundColor: statusInfo.bg }]}>
-                 <Text style={[styles.statusText, { color: statusInfo.color }]}>{statusInfo.label}</Text>
-             </View>
+          {/* Active Orders List */}
+          <Text style={styles.sectionTitle}>Active Orders (Tap to Track Individually)</Text>
+          
+          {loading ? (
+              <ActivityIndicator size="large" color={THEME.headerOrange} style={{ marginVertical: 20 }} />
+          ) : (
+              <View style={styles.listContainer}>
+                  {shipmentsList.map((item, index) => (
+                      <TouchableOpacity 
+                        key={item.id} 
+                        style={styles.orderItem}
+                        onPress={() => (navigation as any).navigate('FranchiseTracking', { 
+                            shipmentId: item.id, 
+                            trackingNumber: item.trackingNumber 
+                        })}
+                      >
+                          <View style={styles.orderIndexCircle}>
+                              <Text style={styles.orderIndexText}>{index + 1}</Text>
+                          </View>
+                          
+                          <View style={styles.orderInfo}>
+                              <View style={styles.orderHeader}>
+                                  <Text style={styles.recipientName}>{item.recipientName}</Text>
+                                  {item.status === 'delivered' && (
+                                       <Ionicons name="checkmark-done" size={16} color={THEME.purple} />
+                                  )}
+                              </View>
+                              <Text style={styles.orderAddress} numberOfLines={1}>{item.deliveryAddress}</Text>
+                              
+                              <View style={styles.orderFooter}>
+                                  <Text style={styles.orderPrice}>${(Number(item.deliveryFee) || 0).toFixed(2)}</Text>
+                                  <View style={styles.trackBtn}>
+                                      <Text style={styles.trackBtnText}>Track Delivery</Text>
+                                  </View>
+                              </View>
+                          </View>
+                      </TouchableOpacity>
+                  ))}
+                  
+                  {shipmentsList.length === 0 && (
+                      <Text style={styles.emptyText}>No shipments found for this batch.</Text>
+                  )}
+              </View>
+          )}
+
+          {/* Franchise Delivery Flow */}
+          <View style={styles.sectionCard}>
+              <Text style={styles.cardSectionTitle}>Franchise Delivery Flow</Text>
+              
+              <View style={styles.timeline}>
+                  <View style={styles.timelineItem}>
+                      <View style={[styles.timelineIcon, { backgroundColor: '#E8F5E9' }]}>
+                          <Ionicons name="checkmark" size={14} color="#4CAF50" />
+                      </View>
+                      <View style={styles.timelineContent}>
+                          <Text style={styles.timelineTitle}>1. Available for Pickup</Text>
+                          <Text style={styles.timelineSubtitle}>{shipmentsList[0]?.merchant?.business_name || 'Store Location'}</Text>
+                      </View>
+                  </View>
+                  <View style={styles.timelineLine} />
+                  
+                  <View style={styles.timelineItem}>
+                      <View style={[styles.timelineIcon, { backgroundColor: ['picked_up', 'in_transit', 'delivered'].includes(batchStats.status) ? '#E8F5E9' : '#F5F5F5' }]}>
+                          <Ionicons name="checkmark" size={14} color={['picked_up', 'in_transit', 'delivered'].includes(batchStats.status) ? "#4CAF50" : "#BDBDBD"} />
+                      </View>
+                      <View style={styles.timelineContent}>
+                          <Text style={[styles.timelineTitle, { color: ['picked_up', 'in_transit', 'delivered'].includes(batchStats.status) ? THEME.text : '#9E9E9E' }]}>2. Picked Up by Rider</Text>
+                          <Text style={styles.timelineSubtitle}>{logistics.riderName}</Text>
+                      </View>
+                  </View>
+                  <View style={styles.timelineLine} />
+
+                  <View style={styles.timelineItem}>
+                       <View style={[styles.timelineIcon, { 
+                           borderColor: ['in_transit', 'delivered'].includes(batchStats.status) ? '#FF9800' : '#E0E0E0', 
+                           borderWidth: 2, 
+                           backgroundColor: '#FFF' 
+                        }]}>
+                          <View style={{ 
+                              width: 8, height: 8, borderRadius: 4, 
+                              backgroundColor: ['in_transit', 'delivered'].includes(batchStats.status) ? '#FF9800' : 'transparent' 
+                          }} />
+                      </View>
+                      <View style={styles.timelineContent}>
+                          <Text style={[styles.timelineTitle, { color: ['in_transit', 'delivered'].includes(batchStats.status) ? THEME.text : '#9E9E9E' }]}>3. Out for Delivery</Text>
+                          <Text style={styles.timelineSubtitle}>Distributed to delivery riders</Text>
+                      </View>
+                  </View>
+              </View>
           </View>
-        </View>
 
-        {/* Delivery Destinations */}
-        <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>Delivery Destinations</Text>
-            <Text style={styles.sectionSubtitle}>(All Trackable):</Text>
+          {/* Logistics Information */}
+          <View style={styles.sectionTitleRow}>
+              <Text style={styles.sectionTitle}>Logistics Information</Text>
+          </View>
+          
+          <View style={styles.logisticsCard}>
+              <View style={styles.logisticsRow}>
+                  <View>
+                      <Text style={styles.logisticsLabel}>Hub Address</Text>
+                      <Text style={styles.logisticsValue}>{logistics.hubAddress}</Text>
+                      <Text style={styles.logisticsSub}>{logistics.hubCity}</Text>
+                  </View>
+              </View>
+              
+              <View style={styles.divider} />
+              
+              <View style={styles.logisticsRow}>
+                  <View>
+                      <Text style={styles.logisticsLabel}>Vehicle Type</Text>
+                      <Text style={styles.logisticsValue}>{logistics.vehicleType}</Text>
+                      <Text style={styles.logisticsSub}>Plate: {logistics.vehiclePlate}</Text>
+                  </View>
+              </View>
 
-            {loading ? (
-                <View style={{ padding: 20 }}>
-                     <ActivityIndicator size="small" color={colors.primary} />
-                </View>
-            ) : (
-                shipmentsList.map((dest, index) => (
-                    <TouchableOpacity 
-                        key={dest.id || index} 
-                        style={styles.destinationRow}
-                        onPress={() => (navigation as any).navigate('FranchiseTracking', { shipmentId: dest.id, trackingNumber: dest.trackingNumber })}
-                    >
-                        <View style={styles.destinationNumber}>
-                            <Text style={styles.destinationNumberText}>{index + 1}</Text>
-                        </View>
-                        <View style={styles.destinationInfo}>
-                            <View style={styles.destinationHeader}>
-                                <Text style={styles.destinationName}>{dest.recipientName || 'Unknown Recipient'}</Text>
-                                <Ionicons name="navigate-outline" size={16} color={purpleTheme.primary} />
-                            </View>
-                            <Text style={styles.destinationAddress} numberOfLines={1}>{dest.deliveryAddress || 'No Address'}</Text>
-                            <Text style={styles.secondaryTrackingId}>{dest.trackingNumber}</Text>
-                        </View>
-                    </TouchableOpacity>
-                ))
-            )}
-            
-            {!loading && shipmentsList.length === 0 && (
-                <Text style={{ textAlign: 'center', color: '#999', padding: 20 }}>
-                    No shipments found in this batch.
-                </Text>
-            )}
-        </View>
+              <View style={styles.divider} />
 
-        {/* Delivery Flow */}
-        <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>Delivery Flow:</Text>
-            
-            <View style={styles.flowContainer}>
-                {/* Step 1 */}
-                <View style={styles.flowStep}>
-                    <View style={styles.checkCircle}>
-                        <Ionicons name="checkmark" size={16} color="white" />
-                    </View>
-                    <Text style={styles.flowText}>Merchant → Pickup Rider → Hub</Text>
-                </View>
+              <View style={styles.logisticsRow}>
+                   <View>
+                      <Text style={styles.logisticsLabel}>Rider Name</Text>
+                      <Text style={styles.logisticsValue}>{logistics.riderName}</Text>
+                   </View>
+              </View>
+          </View>
 
-                {/* Arrow */}
-                <View style={styles.flowArrow}>
-                     <Ionicons name="arrow-down" size={20} color={colors.textLight} />
-                     <Text style={styles.flowSubText}>Sorted & assigned at hub</Text>
-                </View>
+          {/* Important Info Box */}
+          <View style={styles.importantInfoBox}>
+              <View style={styles.infoBoxHeader}>
+                   <Ionicons name="information-circle-outline" size={20} color="#1976D2" />
+                   <Text style={styles.infoBoxTitle}>Read me: Information</Text>
+              </View>
+              <Text style={styles.infoBoxText}>• This is a bulk order. It is split into {batchStats.totalItems} smaller tracking packets.</Text>
+              <Text style={styles.infoBoxText}>• All tracks are real-time via handling partners.</Text>
+              <Text style={styles.infoBoxText}>• See individual shipment tabs for specific proofs of delivery.</Text>
+          </View>
 
-                {/* Step 2 (Active) */}
-                <View style={styles.flowStep}>
-                    <View style={styles.activeCircle}>
-                        <View style={styles.activeDot} />
-                    </View>
-                    <Text style={[styles.flowText, { color: '#FF9800' }]}>Hub → Delivery Riders → Customers</Text>
-                </View>
-            </View>
-        </View>
-
-        {/* Info/Rules Box */}
-        <View style={styles.infoBox}>
-            <View style={styles.infoHeader}>
-                 <Ionicons name="cube" size={16} color="#795548" />
-                 <Text style={styles.infoTitle}>Franchise Delivery Info:</Text>
-            </View>
-            <Text style={styles.infoText}>• Each piece goes to a different customer</Text>
-            <Text style={styles.infoText}>• All {itemCount} pieces have unique tracking numbers</Text>
-            <Text style={styles.infoText}>• All pieces routed through hub</Text>
-            <Text style={styles.infoText}>• Separate delivery riders per area</Text>
-            <Text style={styles.infoText}>• Track each delivery individually</Text>
-        </View>
       </ScrollView>
-
-      {/* Footer Button */}
-      <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 20) }]}>
-         <TouchableOpacity 
-            style={styles.trackAllButton}
-            onPress={() => {
-                if (shipmentsList.length > 0) {
-                     // If multiple, ideally show map. For now, track the first one.
-                     // In a real app, this would navigate to a 'MapTrackingScreen' with all coordinates.
-                    (navigation as any).navigate('FranchiseTracking', { shipmentId: shipmentsList[0].id, trackingNumber: shipmentsList[0].trackingNumber });
-                } else if (orderId) {
-                     // Fallback if list empty but orderId known (unlikely if dynamic)
-                }
-            }}
-         >
-             <Ionicons name="navigate" size={20} color="white" style={{ marginRight: 8 }} />
-             <Text style={styles.trackAllText}>Track All {shipmentsList.length || itemCount} Orders</Text>
-         </TouchableOpacity>
-      </View>
     </View>
   );
 }
@@ -227,277 +313,324 @@ export default function FranchiseOrderDetailsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8F9FA', // Or colors.backgroundLight
+    backgroundColor: '#F5F7FA',
   },
   header: {
+    backgroundColor: THEME.headerOrange,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+  },
+  headerTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.md,
-    backgroundColor: '#fff',
+    justifyContent: 'space-between',
+    paddingBottom: 10,
   },
   backButton: {
-    marginRight: spacing.md,
+    padding: 8,
+    marginLeft: -8,
+  },
+  headerTitleContainer: {
+    alignItems: 'center',
   },
   headerTitle: {
-    fontSize: typography.fontSize.lg,
-    fontWeight: typography.fontWeight.bold,
-    color: colors.text,
+    fontSize: 18,
+    fontWeight: '600',
+    color: 'white',
+  },
+  headerSubtitle: {
+      fontSize: 14,
+      color: 'rgba(255,255,255,0.9)',
+      marginTop: 2,
+  },
+  content: {
     flex: 1,
-  },
-  activeBadge: {
-    backgroundColor: purpleTheme.light,
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  activeBadgeText: {
-    color: purpleTheme.primary,
-    fontSize: typography.fontSize.xs,
-    fontWeight: typography.fontWeight.bold,
-  },
-  scrollView: {
-    flex: 1,
+    marginTop: -20, // Negative margin to overlap header
   },
   scrollContent: {
-    padding: spacing.lg,
-    gap: spacing.md,
-    paddingBottom: 100,
+    paddingHorizontal: 20,
+    paddingBottom: 40,
   },
+  
+  // Main Card
   mainCard: {
-    backgroundColor: '#fff',
-    borderRadius: borderRadius.xl,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: purpleTheme.accent,
-    shadowColor: purpleTheme.primary,
+    backgroundColor: 'white',
+    borderRadius: 20,
+    padding: 20,
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
     elevation: 4,
+    marginBottom: 24,
   },
   cardHeader: {
     flexDirection: 'row',
-    gap: spacing.md,
-    marginBottom: spacing.lg,
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 16,
   },
-  iconContainer: {
+  iconBox: {
     width: 48,
     height: 48,
-    borderRadius: 12,
-    backgroundColor: '#AB47BC', // Purple icon bg
+    borderRadius: 14,
+    backgroundColor: THEME.purple,
     justifyContent: 'center',
     alignItems: 'center',
   },
   cardTitle: {
-    fontSize: typography.fontSize.lg,
-    fontWeight: typography.fontWeight.bold,
-    color: purpleTheme.text,
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: THEME.text,
   },
   cardSubtitle: {
-    fontSize: typography.fontSize.sm,
-    color: purpleTheme.primary,
-    opacity: 0.8,
-  },
-  orderIdContainer: {
-     backgroundColor: '#FAFAFA',
-     padding: spacing.md,
-     borderRadius: borderRadius.lg,
-     marginTop: spacing.sm,
-  },
-  label: {
-      fontSize: typography.fontSize.xs,
-      color: colors.textLight,
-      marginBottom: 2,
-  },
-  orderId: {
-      fontSize: typography.fontSize.lg,
-      fontWeight: typography.fontWeight.bold,
-      color: colors.text,
-      marginBottom: 2,
-  },
-  itemCount: {
-      fontSize: typography.fontSize.sm,
-      color: colors.textLight,
+    fontSize: 12,
+    color: THEME.purple,
+    fontWeight: '500',
   },
   statusBadge: {
-      position: 'absolute',
-      right: spacing.md,
-      top: spacing.md,
-      backgroundColor: '#E8F5E9',
-      paddingHorizontal: 8,
-      paddingVertical: 4,
-      borderRadius: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
   },
   statusText: {
-      color: '#2E7D32',
-      fontSize: typography.fontSize.xs,
-      fontWeight: 'bold',
+    fontSize: 10,
+    fontWeight: 'bold',
   },
-  sectionCard: {
-    backgroundColor: '#fff',
-    borderRadius: borderRadius.xl,
-    padding: spacing.lg,
+  divider: {
+    height: 1,
+    backgroundColor: '#F0F0F0',
+    marginVertical: 12,
   },
-  sectionTitle: {
-      fontSize: typography.fontSize.base,
-      fontWeight: typography.fontWeight.bold,
-      color: colors.text,
-      marginBottom: 2,
+  batchInfoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 4,
   },
-  sectionSubtitle: {
-      fontSize: typography.fontSize.base,
-      color: colors.textLight,
-      marginBottom: spacing.md,
+  batchLabel: {
+    fontSize: 12,
+    color: THEME.textSecondary,
+    marginBottom: 2,
   },
-  destinationRow: {
-      flexDirection: 'row',
-      marginBottom: spacing.md,
-      gap: spacing.md,
+  batchValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: THEME.text,
   },
-  destinationNumber: {
-      width: 32,
-      height: 32,
-      borderRadius: 16,
-      backgroundColor: '#AB47BC', // Purple
-      justifyContent: 'center',
-      alignItems: 'center',
+  itemCount: {
+    fontSize: 13,
+    color: THEME.textSecondary,
+    marginBottom: 12,
   },
-  destinationNumberText: {
-      color: 'white',
-      fontWeight: 'bold',
+  infoBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#FFF3E0',
+    padding: 10,
+    borderRadius: 12,
   },
-  destinationInfo: {
-      flex: 1,
-      backgroundColor: '#F3E5F5', // Very light purple
-      borderRadius: borderRadius.md,
-      padding: spacing.md,
-  },
-  destinationHeader: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'flex-start', // Align top if name wraps
-      marginBottom: 2,
-      gap: 10,
-  },
-  destinationName: {
-      fontWeight: 'bold',
-      color: colors.text,
-      flex: 1, // Allow text to take space but respect icon
-      marginRight: 4,
-  },
-  destinationAddress: {
-      fontSize: typography.fontSize.xs,
-      color: colors.textLight,
-      marginBottom: 4,
-  },
-  secondaryTrackingId: {
-      fontSize: typography.fontSize.xs,
-      color: purpleTheme.primary,
-      fontWeight: 'bold',
-  },
-  
-  // Delivery Flow
-  flowContainer: {
-      marginTop: spacing.sm,
-  },
-  flowStep: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: spacing.md,
-  },
-  checkCircle: {
-      width: 24,
-      height: 24,
-      borderRadius: 12,
-      backgroundColor: '#4CAF50',
-      justifyContent: 'center',
-      alignItems: 'center',
-  },
-  activeCircle: {
-      width: 24,
-      height: 24,
-      borderRadius: 12,
-      borderWidth: 2,
-      borderColor: '#FF9800',
-      justifyContent: 'center',
-      alignItems: 'center',
-  },
-  activeDot: {
-      width: 10,
-      height: 10,
-      borderRadius: 5,
-      backgroundColor: '#FF9800',
-  },
-  flowText: {
-      fontSize: typography.fontSize.base,
-      color: colors.text,
-      flex: 1,
-  },
-  flowArrow: {
-      paddingLeft: 12, // Align with circle center
-      marginVertical: spacing.xs,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: spacing.md,
-  },
-  flowSubText: {
-      fontSize: typography.fontSize.xs,
-      color: colors.textLight,
-      fontStyle: 'italic',
-  },
-  
-  // Info Box
-  infoBox: {
-      backgroundColor: '#F3E5F5', // Light purple
-      borderRadius: borderRadius.xl,
-      padding: spacing.lg,
-      marginTop: spacing.sm,
-  },
-  infoHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: spacing.xs,
-      marginBottom: spacing.sm,
-  },
-  infoTitle: {
-      fontWeight: 'bold',
-      color: '#6A1B9A',
-  },
-  infoText: {
-      fontSize: typography.fontSize.sm,
-      color: '#6A1B9A',
-      marginBottom: 4,
-      opacity: 0.9,
+  infoBannerText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#E65100',
   },
 
-  // Footer
-  footer: {
-      position: 'absolute',
-      bottom: 0,
-      left: 0,
-      right: 0,
-      backgroundColor: '#fff',
-      padding: spacing.lg,
-      borderTopWidth: 1,
-      borderTopColor: '#eee',
+  // Titles
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: THEME.textSecondary,
+    marginBottom: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
-  trackAllButton: {
-      backgroundColor: '#6200EA', // Deep Purple
-      borderRadius: borderRadius.lg,
-      paddingVertical: spacing.md,
+  sectionTitleRow: {
+      marginTop: 24,
+      marginBottom: 8,
+  },
+  
+  // Order List
+  listContainer: {
+    gap: 12,
+  },
+  orderItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: 'white',
+    padding: 16,
+    borderRadius: 16,
+    gap: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.03,
+    shadowRadius: 5,
+    elevation: 2,
+  },
+  orderIndexCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: THEME.purple,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 2,
+  },
+  orderIndexText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  orderInfo: {
+    flex: 1,
+  },
+  orderHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 2,
+  },
+  recipientName: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: THEME.text,
+  },
+  orderAddress: {
+    fontSize: 12,
+    color: THEME.textSecondary,
+    marginBottom: 8,
+  },
+  orderFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  orderPrice: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: THEME.purple,
+  },
+  trackBtn: {
+    backgroundColor: THEME.btnLightOrange,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  trackBtnText: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    color: THEME.btnOrangeText,
+  },
+  emptyText: {
+    textAlign: 'center',
+    color: '#999',
+    marginTop: 20,
+  },
+
+  // Section Card
+  sectionCard: {
+    marginTop: 24,
+    backgroundColor: 'white',
+    borderRadius: 20,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    elevation: 2,
+  },
+  cardSectionTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: THEME.text,
+    marginBottom: 16,
+  },
+  
+  // Timeline
+  timeline: {
+    marginLeft: 8,
+  },
+  timelineItem: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'flex-start',
+  },
+  timelineIcon: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1,
+  },
+  timelineLine: {
+    width: 2,
+    height: 24,
+    backgroundColor: '#E0E0E0',
+    marginLeft: 9, // Center with icon (20/2 - 2/2)
+    marginVertical: 4,
+  },
+  timelineContent: {
+    flex: 1,
+    marginTop: -2,
+  },
+  timelineTitle: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: THEME.text,
+  },
+  timelineSubtitle: {
+    fontSize: 12,
+    color: THEME.textSecondary,
+    marginTop: 2,
+  },
+
+  // Logistics Card
+  logisticsCard: {
+    backgroundColor: 'white',
+    borderRadius: 20,
+    padding: 20,
+  },
+  logisticsRow: {
+    marginBottom: 4,
+  },
+  logisticsLabel: {
+    fontSize: 12,
+    color: THEME.textSecondary,
+    marginBottom: 2,
+  },
+  logisticsValue: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: THEME.text,
+    marginBottom: 1,
+  },
+  logisticsSub: {
+    fontSize: 11,
+    color: '#9E9E9E',
+  },
+
+  // Important Info
+  importantInfoBox: {
+      backgroundColor: '#E3F2FD',
+      borderRadius: 16,
+      padding: 16,
+      marginTop: 24,
+  },
+  infoBoxHeader: {
       flexDirection: 'row',
-      justifyContent: 'center',
       alignItems: 'center',
-      shadowColor: '#6200EA',
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.3,
-      shadowRadius: 8,
-      elevation: 6,
+      gap: 8,
+      marginBottom: 10,
   },
-  trackAllText: {
-      color: 'white',
+  infoBoxTitle: {
+      fontSize: 14,
       fontWeight: 'bold',
-      fontSize: typography.fontSize.lg,
+      color: '#1565C0',
+  },
+  infoBoxText: {
+      fontSize: 12,
+      color: '#1E88E5',
+      marginBottom: 4,
+      lineHeight: 18,
   },
 });

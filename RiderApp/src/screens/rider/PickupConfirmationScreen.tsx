@@ -10,7 +10,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 export default function PickupConfirmationScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
-  const { orderId, order, scannedCode } = route.params || {};
+  const { orderId, order, scannedCode, subItems, isGroup } = route.params || {};
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
 
@@ -19,7 +19,26 @@ export default function PickupConfirmationScreen() {
   // Mutation for confirming pickup
   const pickupMutation = useMutation({
     mutationFn: async () => {
-       // Assuming we send condition and scanned code
+       if (isGroup && subItems && subItems.length > 0) {
+           const promises = subItems.map(async (item: any) => {
+               const payload = {
+                   shipmentId: item.shipmentId,
+                   condition,
+                   scannedCode
+               };
+               return riderApi.pickupOrder(payload);
+           });
+           
+           const responses = await Promise.all(promises);
+           const failed = responses.find(r => !r.success);
+           if (failed) {
+               throw new Error(failed.error?.message || 'Failed to pickup one or more items');
+           }
+           return responses[0]?.data;
+       }
+
+       if (!orderId) throw new Error('Invalid Order ID');
+
        const payload = {
            shipmentId: orderId,
            condition,
@@ -32,16 +51,32 @@ export default function PickupConfirmationScreen() {
        return response.data;
     },
     onSuccess: () => {
-        Alert.alert('Success', 'Pickup Confirmed Successfully!');
+        Alert.alert('Success', 'Pickup Confirmed Successfully!', [
+          {
+            text: 'OK',
+            onPress: () => {
+              // Reset stack to navigate back to the Urgent Routes screen
+              // This ensures we return to the route planning context instead of the main dashboard
+              navigation.reset({
+                index: 0,
+                routes: [{ 
+                    name: 'RiderApp',
+                    params: { 
+                        screen: 'Route', 
+                        params: { routeType: 'urgent' } 
+                    }
+                }],
+              });
+            }
+          }
+        ]);
         
-        queryClient.invalidateQueries({ queryKey: ['order', orderId] });
         queryClient.invalidateQueries({ queryKey: ['activeOrders'] });
-
-        // Navigate back to Home or Next Step
-        navigation.popToTop(); 
+        queryClient.invalidateQueries({ queryKey: ['order', orderId] });
     },
     onError: (err: any) => {
-        Alert.alert('Error', err.message);
+        console.log("Pickup Error:", err);
+        Alert.alert('Error', err.message || "Failed to confirm pickup.");
     }
   });
 

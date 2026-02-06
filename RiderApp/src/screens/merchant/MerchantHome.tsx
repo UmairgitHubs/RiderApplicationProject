@@ -292,7 +292,7 @@ export default function MerchantHome() {
             {/* Destinations List */}
             <View style={styles.destinationsContainer}>
               <Text style={styles.destinationsTitle}>Delivery Destinations:</Text>
-              {bulkOrder.destinations.slice(0, 5).map((dest: any) => (
+              {bulkOrder.destinations.slice(0, 50).map((dest: any) => (
                 <View key={`${bulkOrder.id}-${dest.id}`} style={styles.destinationRow}>
                   <View style={styles.destNumberContainer}>
                     <Text style={styles.destNumber}>{dest.id}</Text>
@@ -305,9 +305,9 @@ export default function MerchantHome() {
                   <Ionicons name="paper-plane-outline" size={16} color={FRANCHISE_PURPLE} />
                 </View>
               ))}
-              {bulkOrder.destinations.length > 5 && (
+              {bulkOrder.destinations.length > 50 && (
                   <Text style={{textAlign: 'center', color: colors.textLight, marginTop: 8, fontSize: 12}}>
-                      + {bulkOrder.destinations.length - 5} more destinations
+                      + {bulkOrder.destinations.length - 50} more destinations
                   </Text>
               )}
             </View>

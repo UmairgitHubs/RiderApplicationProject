@@ -32,13 +32,20 @@ export const getAllShipments = asyncHandler(async (req: AuthRequest, res: Respon
   }
 
   if (startDate || endDate) {
-    globalWhere.created_at = {};
-    if (startDate) globalWhere.created_at.gte = new Date(startDate as string);
-    if (endDate) {
-      const end = new Date(endDate as string);
-      end.setHours(23, 59, 59, 999);
-      globalWhere.created_at.lte = end;
-    }
+     if (typeof startDate === 'string' && startDate !== 'All Dates') {
+        globalWhere.created_at = globalWhere.created_at || {};
+        globalWhere.created_at.gte = new Date(startDate);
+     }
+     
+     if (endDate && typeof endDate === 'string') {
+        globalWhere.created_at = globalWhere.created_at || {};
+        const end = new Date(endDate);
+        // If it's just a date string like YYYY-MM-DD, set to maximize that day
+        if (endDate.indexOf('T') === -1) {
+            end.setHours(23, 59, 59, 999);
+        }
+        globalWhere.created_at.lte = end;
+     }
   }
 
   // Hub Manager Restriction & Filtering for Stats

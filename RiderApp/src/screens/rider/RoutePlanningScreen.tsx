@@ -35,6 +35,7 @@ export default function RoutePlanningScreen() {
       handleStartNavigation,
       handleViewFullRoute,
       handleStartRoute,
+      handleNavigateToHub,
       stats,
       isAssignedRoute
   } = useRoutePlanning(initialType);
@@ -232,6 +233,9 @@ export default function RoutePlanningScreen() {
               <Text style={styles.currentStopNumber}>Stop #{currentStop.stopNumber}</Text>
             </View>
 
+            <Text style={styles.trackingId}>{currentStop.trackingId || 'No ID'}</Text>
+            <Text style={[styles.stopRecipient, { fontSize: 16, marginBottom: 8, color: '#333' }]}>{currentStop.recipient}</Text>
+
             <View style={styles.badgeContainer}>
               {currentStop.type === 'urgent' && (
                 <View style={[styles.badge, styles.urgentBadge]}>
@@ -275,7 +279,20 @@ export default function RoutePlanningScreen() {
 
             <TouchableOpacity
               style={styles.startNavigationButton}
-              onPress={() => navigation.navigate('RiderOrderDetails', { orderId: currentStop.shipmentId })}
+              onPress={() => {
+                navigation.navigate('Navigation', { 
+                  type: currentStop.taskType === 'pickup' ? 'Pickup' : 'Delivery',
+                  address: currentStop.address,
+                  latitude: currentStop.latitude,
+                  longitude: currentStop.longitude,
+                  recipientName: currentStop.recipient,
+                  trackingId: currentStop.trackingId,
+                  orderId: currentStop.shipmentId,
+                  order: { id: currentStop.shipmentId },
+                  subItems: currentStop.subItems,
+                  isGroup: currentStop.isGroup
+                });
+              }}
             >
               <LinearGradient
                 colors={currentStop.type === 'urgent' ? ['#F44336', '#FF6B00'] : ['#2196F3', '#42A5F5']}
@@ -295,13 +312,13 @@ export default function RoutePlanningScreen() {
             <Text style={styles.allStopsCount}>{stops.length} Deliveries</Text>
           </View>
 
-          {stops.length === 0 ? (
+          {stops.filter(s => !(s.status === 'completed' && s.taskType === 'delivery' && stops.some(o => o.status === 'completed' && o.taskType === 'pickup' && o.trackingId === s.trackingId))).length === 0 ? (
             <View style={styles.emptyState}>
               <Ionicons name="map-outline" size={64} color={colors.textLight} />
               <Text style={styles.emptyStateText}>No stops in this route</Text>
             </View>
           ) : (
-            stops.map((stop, index) => (
+            stops.filter(s => !(s.status === 'completed' && s.taskType === 'delivery' && stops.some(o => o.status === 'completed' && o.taskType === 'pickup' && o.trackingId === s.trackingId))).map((stop, index, arr) => (
               <View key={stop.id} style={styles.stopItem}>
                 <View style={styles.stopItemLeft}>
                   {stop.status === 'active' ? (
@@ -332,12 +349,19 @@ export default function RoutePlanningScreen() {
                     </View>
                     <Text style={styles.stopTime}>{stop.eta}</Text>
                     <Text style={styles.stopTrackingId}>{stop.trackingId}</Text>
+                    
+                    <Text style={[styles.stopRecipient, { fontSize: 16, fontWeight: 'bold', marginBottom: 4 }]}>
+                        {stop.recipient}
+                    </Text>
+
                     <View style={styles.stopAddressRow}>
                       <Ionicons name="location-outline" size={14} color={colors.textLight} />
-                      <Text style={styles.stopRecipient} numberOfLines={1}>{stop.address}</Text>
+                      <Text style={[styles.stopRecipient, { fontSize: 13, color: colors.textLight }]} numberOfLines={1}>
+                          {stop.address}
+                      </Text>
                       <Ionicons name="chevron-forward" size={14} color={colors.textLight} />
                     </View>
-                    {index < stops.length - 1 && (
+                    {index < arr.length - 1 && (
                       <Text style={styles.stopNextDistance}>
                         → {stop.estimatedTime} • {stop.distance}
                       </Text>
@@ -430,6 +454,17 @@ export default function RoutePlanningScreen() {
             <Ionicons name="map" size={20} color={colors.textWhite} />
             <Text style={styles.viewFullRouteButtonText}>View Full Route on Map</Text>
           </LinearGradient>
+        </TouchableOpacity>
+
+        {/* Navigate to Hub Button */}
+        <TouchableOpacity
+          style={styles.navigateHubButton}
+          onPress={handleNavigateToHub}
+        >
+          <View style={styles.navigateHubButtonContent}>
+            <Ionicons name="business" size={20} color={colors.textWhite} />
+            <Text style={styles.navigateHubButtonText}>Navigate to Hub</Text>
+          </View>
         </TouchableOpacity>
       </ScrollView>
     </View>
@@ -915,7 +950,7 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   viewFullRouteButton: {
-    marginBottom: spacing.xl,
+    marginBottom: spacing.md,
     borderRadius: borderRadius.lg,
     overflow: 'hidden',
   },
@@ -940,5 +975,23 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     fontSize: typography.fontSize.lg,
     color: colors.textLight,
+  },
+  navigateHubButton: {
+    marginBottom: spacing.xl,
+    borderRadius: borderRadius.lg,
+    backgroundColor: '#607D8B', 
+    overflow: 'hidden',
+  },
+  navigateHubButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.md,
+  },
+  navigateHubButtonText: {
+    color: colors.textWhite,
+    fontSize: typography.fontSize.base,
+    fontWeight: typography.fontWeight.bold,
+    marginLeft: spacing.sm,
   },
 });

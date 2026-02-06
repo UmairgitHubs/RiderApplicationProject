@@ -25,7 +25,9 @@ export default function NavigationScreen() {
     trackingId,
     orderId,
     order,
-    phone
+    phone,
+    subItems,
+    isGroup
   } = (route.params as any) || {};
 
   // Destination State (Dynamic resolution)
@@ -239,11 +241,27 @@ export default function NavigationScreen() {
   };
 
   const handleMarkAsReached = () => {
-    navigation.navigate('QRScanner', {
-      orderId: order?.id || orderId,
-      order: order,
-      scanType: type === 'Pickup' ? 'pickup' : 'delivery'
-    });
+    if (type === 'Hub') {
+        navigation.navigate('DeliveryConfirmation', {
+            isHubArrival: true,
+            hubDetails: { name: recipientName, address: address, latitude, longitude },
+            scanType: 'hub_dropoff'
+        });
+    } else if (type === 'Delivery') {
+        navigation.navigate('DeliveryConfirmation', {
+            orderId: order?.id || orderId,
+            order: order,
+            scanType: 'delivery'
+        });
+    } else {
+        navigation.navigate('PickupConfirmation', {
+            orderId: order?.id || orderId,
+            order: order,
+            scanType: 'pickup',
+            subItems,
+            isGroup
+        });
+    }
   };
 
   const handleExternalMaps = () => {
@@ -440,7 +458,11 @@ export default function NavigationScreen() {
                     activeOpacity={0.8}
                   >
                       <Ionicons name="checkmark-circle" size={24} color="#FFF" />
-                      <Text style={styles.mainStartBtnText}>Mark as {type === 'Pickup' ? 'Reached Pickup' : 'Reached Delivery'}</Text>
+                      <Text style={styles.mainStartBtnText}>
+                          {type === 'Hub' 
+                              ? 'Arrived at Hub' 
+                              : `Mark as ${type === 'Pickup' ? 'Reached Pickup' : 'Reached Delivery'}`}
+                      </Text>
                   </TouchableOpacity>
               </View>
               )}

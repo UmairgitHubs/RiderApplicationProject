@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { Alert, Platform, Linking } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import * as Location from 'expo-location';
 import { riderApi } from '../services/api';
 
@@ -18,6 +19,9 @@ export interface RouteStop {
   stopNumber: number;
   latitude?: number;
   longitude?: number;
+  itemCount?: number; // For grouped stops (e.g., bulk pickup)
+  subItems?: { shipmentId: string, trackingId: string }[]; // Details of grouped items
+  isGroup?: boolean;
 }
 
 export interface RouteStats {
@@ -36,6 +40,7 @@ const ROAD_FACTOR = 1.3; // Aproximation for non-straight roads
 const DEFAULT_SERVICE_TIME_MIN = 15;
 
 export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgent') => {
+  const navigation = useNavigation<any>();
   const [routeType, setRouteType] = useState<'urgent' | 'nextDay'>(initialRouteType);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -100,166 +105,173 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
       } catch (e) { return null; }
   };
 
-  // Updated Optimization: Sorts by Nearest Neighbor starting from 'startLocation'
+  // Updated Optimization: Sorts by Nearest Neighbor with forced Hub Sequencing
   const optimizeAndMapOrders = useCallback((orders: any[], startLat: number, startLng: number, type: 'urgent' | 'nextDay') => {
-    const unvisited = [...orders];
-    const optimizedStops: RouteStop[] = [];
     
-    let currentLat = startLat;
-    let currentLng = startLng;
-    let stopOrderCounter = 1;
-    let accumulatedTimeMin = 0;
-
-    // Validate Start Location
-    if (!currentLat || !currentLng) {
-        currentLat = 0;
-        currentLng = 0;
-    }
-
-    // Helper to get coords and info based on task type
+    // Helper to get consistent location/address info
     const getStopInfo = (item: any) => {
         const shipment = item.shipment || item;
-        // Determine task type: explicitly from route stop, or infer from shipment status
-        let taskType: 'pickup' | 'delivery' = 'delivery'; // Default
         
-        if (item.type && (item.type === 'pickup' || item.type === 'delivery')) {
+        let taskType: 'pickup' | 'delivery' = 'delivery'; 
+        if (item._taskType) { 
+            taskType = item._taskType; 
+        } else if (item.type) {
             taskType = item.type;
         } else if (shipment.status === 'assigned' || shipment.status === 'pending') {
-            // If just assigned/pending and no explicit route stop type, assume pickup? 
-            // Or if we are in 'activeOrders' mode (no route), 'assigned' usually means we need to pick it up.
-            // But 'pending' means unassigned?
-            // Let's stick to: if explicit type exists, use it. Else check status.
             taskType = (shipment.status === 'picked_up' || shipment.status === 'in_transit') ? 'delivery' : 'pickup';
         }
 
-        // Get Coords based on taskType
-        let latVal, lngVal, address;
-        
-        if (taskType === 'pickup') {
-            latVal = item.latitude || shipment.pickupLatitude || shipment.pickup_latitude;
-            lngVal = item.longitude || shipment.pickupLongitude || shipment.pickup_longitude;
-            // Prioritize shipment address as it's the source of truth
-            address = shipment.pickupAddress || shipment.pickup_address || item.location;
-        } else {
-            latVal = item.latitude || shipment.deliveryLatitude || shipment.delivery_latitude;
-            lngVal = item.longitude || shipment.deliveryLongitude || shipment.delivery_longitude;
-            // Prioritize shipment address
-            address = shipment.deliveryAddress || shipment.delivery_address || shipment.address || item.location;
-        }
-        
-        // Fallbacks if specific ones missing (e.g. item.latitude might be the correct one regardless of type if provided by backend stop)
-        if (!latVal) latVal = item.latitude || shipment.latitude;
-        if (!lngVal) lngVal = item.longitude || shipment.longitude;
-        if (!address) address = item.location || shipment.address;
+        let latVal = 0, lngVal = 0, address = '';
+        const isSecondLeg = (shipment.status === 'received_at_hub' || shipment.status === 'in_transit' || shipment.status === 'out_for_delivery');
+        const hubAddress = shipment.hub?.address || shipment.hub?.name || 'Hub';
+        const hubLat = shipment.hub?.latitude;
+        const hubLng = shipment.hub?.longitude;
 
-        return {
-            lat: parseFloat(latVal || '0'),
-            lng: parseFloat(lngVal || '0'),
-            address: address || '',
-            taskType
-        };
+        if (taskType === 'pickup') {
+            if (item.location) { latVal = item.latitude; lngVal = item.longitude; address = item.location; }
+            else if (shipment.pickupAddress) { latVal = shipment.pickupLatitude; lngVal = shipment.pickupLongitude; address = shipment.pickupAddress; }
+            else {
+                if (isSecondLeg) { latVal = hubLat; lngVal = hubLng; address = hubAddress; }
+                else { latVal = shipment.pickup_latitude; lngVal = shipment.pickup_longitude; address = shipment.pickup_address; }
+            }
+        } else {
+            if (item.location) { latVal = item.latitude; lngVal = item.longitude; address = item.location; }
+            else if (shipment.deliveryAddress) { latVal = shipment.deliveryLatitude; lngVal = shipment.deliveryLongitude; address = shipment.deliveryAddress; }
+            else {
+                // If it's First Mile (not second leg), we are delivering TO HUB
+                // Logic: NOT Second Leg AND Has Hub ID = First Mile (Merchant -> Hub)
+                if (!isSecondLeg && shipment.hub_id) { latVal = hubLat; lngVal = hubLng; address = hubAddress; }
+                else { latVal = shipment.delivery_latitude; lngVal = shipment.delivery_longitude; address = shipment.delivery_address; }
+            }
+        }
+
+        if (!latVal && !lngVal) { latVal = item.latitude || shipment.latitude; lngVal = item.longitude || shipment.longitude; }
+        if (!address) address = item.location || shipment.address || 'Unknown Location';
+
+        // Robust check for Hub containment
+        // We consider it a "Hub Stop" if address matches Hub OR coords match Hub
+        // OR taskType implies Hub interaction (e.g. First Mile Delivery)
+        
+        const isHubStop = address === hubAddress || 
+                         (Math.abs(latVal - hubLat) < 0.0001 && Math.abs(lngVal - hubLng) < 0.0001) ||
+                         (taskType === 'delivery' && !isSecondLeg) || // First Mile Drop
+                         (taskType === 'pickup' && isSecondLeg); // Second Mile Pick
+
+        // Exclude customer locations that might accidentally be named "Hub"? Unlikely.
+        
+        return { lat: parseFloat(String(latVal || 0)), lng: parseFloat(String(lngVal || 0)), address, taskType, isHub: isHubStop };
     };
 
-    while (unvisited.length > 0) {
-      let nearestIndex = -1;
-      let minDist = Infinity;
+    // 1. Segmentation
+    const hubPickups: any[] = [];
+    const hubDeliveries: any[] = [];
+    const standardStops: any[] = [];
 
-      for (let i = 0; i < unvisited.length; i++) {
-        const order = unvisited[i];
-        const { lat, lng } = getStopInfo(order);
+    orders.forEach(order => {
+        const info = getStopInfo(order);
+        // Tag order with computed info for later use to avoid re-calc
+        order._computed = info;
 
-        if (lat === 0 && lng === 0) continue;
+        if (info.isHub) {
+            if (info.taskType === 'pickup') hubPickups.push(order);
+            else hubDeliveries.push(order);
+        } else {
+            standardStops.push(order);
+        }
+    });
 
+    // 2. Optimization Sequence Construction
+    const finalSequence: RouteStop[] = [];
+    let currentLat = startLat || 0;
+    let currentLng = startLng || 0;
+    let stopOrderCounter = 1;
+    let accumulatedTimeMin = 0;
+
+    const processItem = (order: any) => {
+        const shipment = order.shipment || order;
+        const info = order._computed; // Already computed
+        
+        // Coords
+        const lat = info.lat;
+        const lng = info.lng;
+
+        // Dist Calc
         const dist = (currentLat === 0 && currentLng === 0) ? 0 : calculateDistance(currentLat, currentLng, lat, lng);
         
-        if (dist < minDist) {
-          minDist = dist;
-          nearestIndex = i;
-        }
-      }
-
-      if (nearestIndex !== -1) {
-        const nearest = unvisited[nearestIndex];
-        const shipment = nearest.shipment || nearest;
-        const { lat, lng, address, taskType } = getStopInfo(nearest);
-        
-        // Dynamic Service Time - Ensure we handle ISO dates vs numbers correctly
+        // Time
         let serviceTimeDiff = DEFAULT_SERVICE_TIME_MIN;
         const estTime = shipment.estimatedDeliveryTime || shipment.estimated_delivery_time || shipment.estimatedTime;
-        
-        if (estTime) {
-            // If it's a number or numeric string
-            if (!isNaN(Number(estTime))) {
-                serviceTimeDiff = parseInt(String(estTime));
-            } 
-            // If it's likely a Date, we can't easily infer "duration" from a timestamp without start time
-            // So we stick to default for service time duration
-        }
-        
-        // Travel Time Estimation
-        const roadDistanceKm = minDist * ROAD_FACTOR;
-        const travelTimeMin = (roadDistanceKm / AVERAGE_SPEED_KMPH) * 60; 
-        
+        if (estTime && !isNaN(Number(estTime))) serviceTimeDiff = parseInt(String(estTime));
+
+        const roadDistanceKm = dist * ROAD_FACTOR;
+        const travelTimeMin = (roadDistanceKm / AVERAGE_SPEED_KMPH) * 60;
         accumulatedTimeMin += Math.round(travelTimeMin + serviceTimeDiff);
 
-        // Calculate ETA
+        // ETA
         const now = new Date();
         now.setMinutes(now.getMinutes() + accumulatedTimeMin);
+        
+        // Update Current Cursor
+        currentLat = lat;
+        currentLng = lng;
 
-        optimizedStops.push({
-            id: nearest.id || `${shipment.id || 'unknown'}-${taskType}-${stopOrderCounter}`,
+        finalSequence.push({
+            id: order.id || `${shipment.id || 'unknown'}-${info.taskType}-${stopOrderCounter}`,
             shipmentId: shipment.id,
             trackingId: shipment.trackingNumber || shipment.tracking_number || '',
             recipient: shipment.recipientName || shipment.recipient_name || 'Customer',
-            address: address, // Now correctly populated from getStopInfo
+            address: info.address, 
             distance: `${roadDistanceKm.toFixed(1)} km`, 
             estimatedTime: `${serviceTimeDiff} min`,
             status: 'pending', 
-            type, // Route Type (Urgent/NextDay)
-            taskType, // Pickup/Delivery
+            type, 
+            taskType: info.taskType, 
             eta: now.toLocaleTimeString([], { hour: '2-digit', minute:'2-digit'}),
-            stopNumber: stopOrderCounter,
+            stopNumber: stopOrderCounter++,
             latitude: lat,
             longitude: lng,
+            itemCount: order.itemCount,
+            subItems: order.subItems
         });
+    };
 
-        currentLat = lat;
-        currentLng = lng;
-        stopOrderCounter++;
-        unvisited.splice(nearestIndex, 1);
-      } else {
-        // Handle remaining items with invalid coords
-        unvisited.forEach(u => {
-             const shipment = u.shipment || u;
-             const { taskType, address } = getStopInfo(u);
+    // Sequence Strategy:
+    // A. Hub Pickups (Start) - e.g. Second Mile loading
+    hubPickups.forEach(processItem);
 
-             // Attempt to get backend provided stats if calculation failed
-             const fallbackDist = shipment.distanceKm || shipment.distance_km || '0';
-             const fallbackEta = shipment.estimatedDeliveryTime || shipment.estimated_delivery_time 
-                               ? new Date(shipment.estimatedDeliveryTime || shipment.estimated_delivery_time).toLocaleTimeString([], { hour: '2-digit', minute:'2-digit' }) 
-                               : 'N/A';
+    // B. Optimize Standard Stops (Middle) - e.g. Merchants or Customers
+    const unvisitedMiddle = [...standardStops];
+    while (unvisitedMiddle.length > 0) {
+        let nearestIndex = -1;
+        let minDist = Infinity;
 
-             optimizedStops.push({
-                 id: u.id || `fallback-${shipment.id || 'unknown'}-${taskType}-${stopOrderCounter}`,
-                 shipmentId: shipment.id,
-                 trackingId: shipment.trackingNumber || shipment.tracking_number || '',
-                 recipient: shipment.recipientName || shipment.recipient_name || 'Customer',
-                 address: address || 'Unknown',
-                 distance: `${fallbackDist} km`, 
-                 estimatedTime: `${DEFAULT_SERVICE_TIME_MIN} min`,
-                 status: 'pending',
-                 type,
-                 taskType,
-                 eta: fallbackEta,
-                 stopNumber: stopOrderCounter++,
-                 latitude: 0,
-                 longitude: 0
-             });
-        });
-        break;
-      }
+        for (let i = 0; i < unvisitedMiddle.length; i++) {
+            const item = unvisitedMiddle[i];
+            const info = item._computed;
+            if (info.lat === 0 && info.lng === 0) continue;
+
+            const d = calculateDistance(currentLat, currentLng, info.lat, info.lng);
+            if (d < minDist) {
+                minDist = d;
+                nearestIndex = i;
+            }
+        }
+
+        // Fallback for invalid coords
+        if (nearestIndex === -1 && unvisitedMiddle.length > 0) nearestIndex = 0;
+
+        if (nearestIndex !== -1) {
+            processItem(unvisitedMiddle[nearestIndex]);
+            unvisitedMiddle.splice(nearestIndex, 1);
+        } else {
+            break; 
+        }
     }
-    return optimizedStops;
+
+    // C. Hub Deliveries (End) - Skipped because we use "Navigate to Hub" button for final dropoff
+    // hubDeliveries.forEach(processItem);
+
+    return finalSequence;
   }, [calculateDistance]);
 
   const calculateStats = useCallback((stopsList: RouteStop[], overrides?: { totalKm?: number, totalMinutes?: number }) => {
@@ -301,101 +313,233 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
   // --- Sync Logic: Raw Data + Location -> Stops ---
   useEffect(() => {
      const processRoute = () => {
-         // STRICT LOGIC:
-         // - "Urgent" Tab = Status 'active' (In Progress)
-         // - "Next Day" Tab = Status 'assigned' | 'pending' | 'draft' (Not started yet)
+         // Gather all applicable routes
+         const activeRoutes = rawRoutes.filter((r: any) => r.status === 'active');
+         const pendingRoutes = rawRoutes.filter((r: any) => ['pending', 'assigned', 'draft'].includes(r.status));
          
-         const activeRoute = rawRoutes.find((r: any) => r.status === 'active');
-         const pendingRoute = rawRoutes.find((r: any) => ['pending', 'assigned', 'draft'].includes(r.status));
-         
-         // Select route based on the requested tab (routeType)
-         let targetRoute: any = null;
-         
+         let targetRoutes: any[] = [];
          if (routeType === 'urgent') {
-             targetRoute = activeRoute;
+             targetRoutes = activeRoutes;
          } else {
-             targetRoute = pendingRoute;
+             targetRoutes = pendingRoutes;
          }
+
+         // 1. Extract stops from Routes
+         let routeStopsRaw: any[] = [];
+         if (targetRoutes.length > 0) {
+             setIsAssignedRoute(true);
+             routeStopsRaw = targetRoutes.reduce((acc: any[], route: any) => {
+                 if (route.stops && Array.isArray(route.stops)) {
+                    // Filter out stops that are pure waypoints with no payload
+                    const validStops = route.stops.filter((s: any) => s.shipment_id || s.shipment);
+                    return [...acc, ...validStops];
+                 }
+                 return acc;
+             }, []);
+         } else {
+             setIsAssignedRoute(false);
+         }
+
+         // 2. Extract loose orders (directly assigned shipments not in a route)
+         const filteredOrders = filterOrdersByType(activeOrders, routeType);
          
-         // Start Point: Rider Location or Default
+         // 3. Identify Shipment IDs already in routes to avoid duplicates
+         const routeShipmentIds = new Set(routeStopsRaw.map((s: any) => s.shipment?.id || s.shipment_id || s.shipmentId));
+         
+         // 4. Convert loose orders to "Pseudo Stops"
+         const looseStopsRaw = filteredOrders.filter(order => !routeShipmentIds.has(order.id)).map((order, index) => {
+             // Mock the structure of a backend route stop for consistency
+             return {
+                 id: `loose-${order.id}`,
+                 shipment_id: order.id,
+                 shipment: order,
+                 type: (order.status === 'picked_up' || order.status === 'in_transit') ? 'delivery' : 'pickup', // infer type
+                 status: (order.status === 'delivered') ? 'completed' : 'pending',
+                 location: '', // will be resolved in normalization
+                 latitude: order.pickupLatitude || order.latitude, // best guess, fixed in normalization
+                 longitude: order.pickupLongitude || order.longitude
+             };
+         });
+
+         // 5. Combine and Deduplicate
+         const allRawStops = [...routeStopsRaw, ...looseStopsRaw];
+         const uniqueStopsMap = new Map();
+         
+         allRawStops.forEach((s: any) => {
+             const sShipment = s.shipment || {};
+             // Use Shipment ID + Type (pickup/delivery) as unique key
+             // Fallback to ID if type unclear
+             const type = s.type || ((sShipment.status === 'picked_up' || sShipment.status === 'in_transit') ? 'delivery' : 'pickup');
+             const shipmentId = sShipment.id || s.shipment_id || s.shipmentId || s.id;
+             const key = `${shipmentId}-${type}`;
+             
+             if (!uniqueStopsMap.has(key)) {
+                 uniqueStopsMap.set(key, s);
+             }
+         });
+         const dedupedStops = Array.from(uniqueStopsMap.values()).filter((s: any) => {
+             const sShipment = s.shipment || {};
+             const type = s.type || ((sShipment.status === 'picked_up' || sShipment.status === 'in_transit') ? 'delivery' : 'pickup');
+             
+             // If this represents a DELIVERY stop, but we haven't picked up the package yet, HIDE IT.
+             // This ensures only the Pickup stop is visible initially.
+             if (type === 'delivery') {
+                 const status = sShipment.status;
+                 if (status === 'assigned' || status === 'pending') {
+                     return false; 
+                 }
+             }
+             return true;
+         });
+
+         // 6. Separate Completed vs Pending
+         const completed = dedupedStops.filter((s:any) => s.status === 'completed' || s.shipment?.status === 'delivered');
+         const pending = dedupedStops.filter((s:any) => s.status !== 'completed' && s.shipment?.status !== 'delivered');
+
+         // 7. Normalize Completed Stops
+         const mappedCompleted: RouteStop[] = completed.map((s:any, i:number) => {
+             const sShipment = s.shipment || {};
+             const taskType = (s.type || ((sShipment.status === 'picked_up' || sShipment.status === 'in_transit') ? 'delivery' : 'pickup')) as 'pickup' | 'delivery';
+             let address = '';
+             if (taskType === 'pickup') {
+                 address = sShipment.pickup_address || sShipment.pickupAddress || s.location;
+             } else {
+                 address = sShipment.delivery_address || sShipment.deliveryAddress || s.location;
+             }
+             return {
+                 id: s.id || `completed-${i}`,
+                 shipmentId: sShipment.id || s.shipment_id,
+                 trackingId: sShipment.trackingNumber || sShipment.tracking_number || '',
+                 recipient: sShipment.recipientName || sShipment.recipient_name || 'Customer',
+                 address: address || '',
+                 distance: '0 km',
+                 estimatedTime: '0 min',
+                 status: 'completed' as const,
+                 type: routeType,
+                 taskType: taskType,
+                 eta: 'Completed',
+                 stopNumber: i + 1,
+                 latitude: parseFloat(s.latitude || '0'),
+                 longitude: parseFloat(s.longitude || '0')
+             };
+         });
+
+         // 8. Group and Optimize Pending Stops
+         
+         // 8a. Group Pickups by Location
+         const pendingDeliveries: any[] = [];
+         const pendingPickups: any[] = [];
+         
+         pending.forEach((s: any) => {
+             const sShipment = s.shipment || {};
+             
+             // Filter out First Mile Delivery Stops (Hub Dropoffs) - Legacy Support
+             if (s.type === 'delivery' && (sShipment.status === 'assigned' || sShipment.status === 'pending')) {
+                 return;
+             }
+             
+             const taskType = (s.type || ((sShipment.status === 'picked_up' || sShipment.status === 'in_transit') ? 'delivery' : 'pickup'));
+             
+             // Normalize internal structure for grouping
+             const item = { ...s, _taskType: taskType };
+             if (taskType === 'pickup') {
+                 pendingPickups.push(item);
+             } else {
+                 pendingDeliveries.push(item);
+             }
+         });
+
+         // Group Pickups
+         const groupedPickups: any[] = [];
+         const pickupGroups = new Map<string, any[]>();
+         
+         pendingPickups.forEach(p => {
+             const sShipment = p.shipment || {};
+             const lat = parseFloat(p.latitude || p.pickupLatitude || sShipment.pickupLatitude || sShipment.pickup_latitude || '0');
+             const lng = parseFloat(p.longitude || p.pickupLongitude || sShipment.pickupLongitude || sShipment.pickup_longitude || '0');
+             const address = p.location || sShipment.pickup_address || sShipment.pickupAddress || 'Unknown';
+             const key = (lat !== 0 && lng !== 0) ? `${lat.toFixed(4)},${lng.toFixed(4)}` : address.trim().toLowerCase();
+             
+             if (!pickupGroups.has(key)) pickupGroups.set(key, []);
+             pickupGroups.get(key)?.push(p);
+         });
+
+         pickupGroups.forEach((items, key) => {
+             if (items.length === 1) {
+                 groupedPickups.push(items[0]);
+             } else {
+                 const first = items[0];
+                 const sShipment = first.shipment || {};
+                 groupedPickups.push({
+                     ...first,
+                     id: `group-pick-${key}`,
+                     isGroup: true,
+                     itemCount: items.length,
+                     subItems: items.map(i => ({ shipmentId: i.shipment?.id || i.shipment_id, trackingId: i.shipment?.trackingNumber || i.shipment?.tracking_number })),
+                     latitude: first.latitude, longitude: first.longitude, location: first.location, 
+                     shipment: { ...sShipment, recipient_name: `${items.length} Pickup(s)`, recipientName: `${items.length} Pickup(s)`, tracking_number: 'Bulk Order', trackingNumber: 'Bulk Order' }
+                 });
+             }
+         });
+
+         // Group Deliveries
+         const groupedDeliveries: any[] = [];
+         const deliveryGroups = new Map<string, any[]>();
+         
+         pendingDeliveries.forEach(p => {
+             const sShipment = p.shipment || {};
+             const lat = parseFloat(p.latitude || p.deliveryLatitude || sShipment.deliveryLatitude || sShipment.delivery_latitude || '0');
+             const lng = parseFloat(p.longitude || p.deliveryLongitude || sShipment.deliveryLongitude || sShipment.delivery_longitude || '0');
+             const address = p.location || sShipment.delivery_address || sShipment.deliveryAddress || 'Unknown';
+             const key = (lat !== 0 && lng !== 0) ? `${lat.toFixed(4)},${lng.toFixed(4)}` : address.trim().toLowerCase();
+             
+             if (!deliveryGroups.has(key)) deliveryGroups.set(key, []);
+             deliveryGroups.get(key)?.push(p);
+         });
+
+         deliveryGroups.forEach((items, key) => {
+             if (items.length === 1) {
+                 groupedDeliveries.push(items[0]);
+             } else {
+                 const first = items[0];
+                 const sShipment = first.shipment || {};
+                 groupedDeliveries.push({
+                     ...first,
+                     id: `group-del-${key}`,
+                     isGroup: true,
+                     itemCount: items.length,
+                     subItems: items.map(i => ({ shipmentId: i.shipment?.id || i.shipment_id, trackingId: i.shipment?.trackingNumber || i.shipment?.tracking_number })),
+                     latitude: first.latitude, longitude: first.longitude, location: first.location, 
+                     shipment: { ...sShipment, recipient_name: 'Bulk Dropoff', recipientName: 'Bulk Dropoff', tracking_number: `${items.length} Packages`, trackingNumber: `${items.length} Packages` }
+                 });
+             }
+         });
+
+         const itemsToOptimize = [...groupedPickups, ...groupedDeliveries];
+
+         // 8b. Optimize
          const startLat = currentLocation?.lat || DEFAULT_START_LOCATION.lat;
          const startLng = currentLocation?.lng || DEFAULT_START_LOCATION.lng;
+         
+         const mappedPending = optimizeAndMapOrders(itemsToOptimize, startLat, startLng, routeType);
+         
+         // 8c. Propagate Group Data
+         mappedPending.forEach(stop => {
+             const originalInfo = itemsToOptimize.find(o => o.id === stop.id || (o.isGroup && o.id === stop.id) || o.shipment?.id === stop.shipmentId);
+             if (originalInfo && originalInfo.isGroup) {
+                 stop.itemCount = originalInfo.itemCount;
+                 stop.subItems = originalInfo.subItems;
+                 stop.recipient = originalInfo.shipment?.recipientName;
+                 stop.trackingId = originalInfo.shipment?.trackingNumber;
+             }
+         });
 
-         let finalStops: RouteStop[] = [];
-         let usedRoute = false;
+         // 9. Final List
 
-         if (targetRoute && targetRoute.stops.length > 0) {
-             usedRoute = true;
-             setIsAssignedRoute(true);
+         let finalStops = [...mappedCompleted, ...mappedPending];
+         finalStops.forEach((s, i) => s.stopNumber = i + 1);
 
-             // Deduplicate stops to ensure uniqueness (Shipment ID + Type)
-             // This safeguards against backend data corruption or duplicate entries
-             const uniqueStopsMap = new Map();
-             targetRoute.stops.forEach((s: any) => {
-                 const key = `${s.shipment_id || s.shipmentId}-${s.type}-${s.location}`;
-                 if (!uniqueStopsMap.has(key)) {
-                     uniqueStopsMap.set(key, s);
-                 }
-             });
-             const dedupedStops = Array.from(uniqueStopsMap.values());
-
-             // Separate Completed vs Pending using deduped list
-             const completed = dedupedStops.filter((s:any) => s.status === 'completed' || s.shipment?.status === 'delivered');
-             const pending = dedupedStops.filter((s:any) => s.status !== 'completed' && s.shipment?.status !== 'delivered');
-             
-             // 1. Map Completed (Keep as is, distance 0 or original)
-             const mappedCompleted: RouteStop[] = completed.map((s:any, i:number) => {
-                 const sShipment = s.shipment || {};
-                 const taskType = (s.type || ((sShipment.status === 'picked_up' || sShipment.status === 'in_transit') ? 'delivery' : 'pickup')) as 'pickup' | 'delivery';
-                 
-                 // Resolve address carefully for completed items
-                 let address = '';
-                 if (taskType === 'pickup') {
-                     address = sShipment.pickup_address || sShipment.pickupAddress || s.location;
-                 } else {
-                     address = sShipment.delivery_address || sShipment.deliveryAddress || s.location;
-                 }
-                 
-                 return {
-                     // Critical: Use valid Stop ID, or composite to ensure uniqueness
-                     id: s.id || `${sShipment.id || 'unknown'}-${s.type || 'stop'}-${i}`,
-                     shipmentId: sShipment.id || s.shipment_id,
-                     trackingId: sShipment.trackingNumber || sShipment.tracking_number || '',
-                     recipient: sShipment.recipientName || sShipment.recipient_name || 'Customer',
-                     address: address || '',
-                     distance: '0 km', // Already done
-                     estimatedTime: '0 min',
-                     status: 'completed' as const,
-                     type: routeType,
-                     taskType: taskType,
-                     eta: 'Completed',
-                     stopNumber: i + 1,
-                     latitude: parseFloat(s.latitude),
-                     longitude: parseFloat(s.longitude)
-                 };
-             });
-
-             // 2. Optimally Sort Pending based on Current Location
-             // Note: We ignore backend sequence to prioritize "Closest First" for the rider
-             const mappedPending = optimizeAndMapOrders(pending, startLat, startLng, routeType);
-
-             // 3. Combine
-             finalStops = [...mappedCompleted, ...mappedPending];
-             
-             // Adjust stop numbers
-             finalStops.forEach((s, i) => s.stopNumber = i + 1);
-
-         } else {
-             // Local Optimization
-             usedRoute = false;
-             setIsAssignedRoute(false);
-             const filtered = filterOrdersByType(activeOrders, routeType);
-             
-             // Sort all
-             finalStops = optimizeAndMapOrders(filtered, startLat, startLng, routeType);
-         }
-
-         // Mark Active (First Pending)
+         // 10. Mark Active Information
          let activeFound = false;
          let newCurrentIndex = 0;
          finalStops = finalStops.map((stop, index) => {
@@ -403,9 +547,6 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
              if (!activeFound) {
                  activeFound = true;
                  newCurrentIndex = index;
-                 
-                 // CRITICAL: Update distance for FIRST active stop to be from RIDER
-                 // optimizeAndMapOrders already did this relative to startLat/Lng!
                  return { ...stop, status: 'active' };
              }
              return { ...stop, status: 'pending' }; 
@@ -414,13 +555,8 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
          setCurrentStopIndex(newCurrentIndex);
          setStops(finalStops);
          
-         // Stats - Pass possible overrides but calculateStats determines validity
-         const overrides = (usedRoute && targetRoute) ? {
-            totalKm: targetRoute.distance || targetRoute.distance_km ? Number(targetRoute.distance || targetRoute.distance_km) : undefined,
-            totalMinutes: targetRoute.duration || targetRoute.duration_min ? Number(targetRoute.duration || targetRoute.duration_min) : undefined
-        } : undefined;
-        
-        calculateStats(finalStops, overrides);
+         // Stats calculation
+         calculateStats(finalStops);
      };
 
      processRoute();
@@ -440,12 +576,13 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
       const routes = routesRes.data?.routes || [];
       const orders = ordersRes.data?.orders || [];
 
-      // Update Counts
-      const activeRoute = routes.find((r: any) => r.status === 'active');
-      const pendingRoute = routes.find((r: any) => r.status === 'pending' || r.status === 'draft');
+      // Update Counts - Aggregate ALL stops from ALL relevant routes
+      const activeStats = routes.filter((r: any) => r.status === 'active').reduce((acc: number, r: any) => acc + (r.stops?.length || 0), 0);
+      const pendingStats = routes.filter((r: any) => ['pending', 'draft', 'assigned'].includes(r.status)).reduce((acc: number, r: any) => acc + (r.stops?.length || 0), 0);
+      
       setRouteSpecs({
-          urgent: activeRoute?.stops?.length ?? null,
-          nextDay: pendingRoute?.stops?.length ?? null
+          urgent: activeStats > 0 ? activeStats : null,
+          nextDay: pendingStats > 0 ? pendingStats : null
       });
 
       setRawRoutes(routes);
@@ -607,6 +744,93 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
     handleStartNavigation,
     handleViewFullRoute,
     handleStartRoute,
+    handleNavigateToHub: useCallback(() => {
+        // Collect ALL Unique Hubs based on CURRENT context first
+        const uniqueHubs = new Map<string, any>();
+        
+        // Filter routes based on what the user is currently looking at
+        // If viewing 'urgent', look at 'active' routes. If 'nextDay', look at 'pending/assigned'.
+        const targetStatus = routeType === 'urgent' ? ['active'] : ['pending', 'assigned', 'draft'];
+        
+        const relevantRoutes = rawRoutes.filter((r: any) => targetStatus.includes(r.status));
+        
+        // 1. From Relevant Routes
+        relevantRoutes.forEach((r: any) => {
+            if (r.hub) uniqueHubs.set(r.hub.id, r.hub);
+        });
+
+        // 2. Determine distinct hubs from RELEVANT context
+        let distinctHubs = Array.from(uniqueHubs.values());
+
+        // 3. Fallback: If no hub found in current context (e.g. loose orders only?), check ALL routes/orders
+        if (distinctHubs.length === 0) {
+             rawRoutes.forEach((r: any) => { if (r.hub) uniqueHubs.set(r.hub.id, r.hub); });
+             activeOrders.forEach((o: any) => {
+                const h = o.shipment?.hub || o.hub;
+                if (h) uniqueHubs.set(h.id, h);
+            });
+            distinctHubs = Array.from(uniqueHubs.values());
+        }
+
+        console.log('NavigateToHub Debug:', { 
+            routeType,
+            relevantRoutesCount: relevantRoutes.length,
+            uniqueHubsFound: distinctHubs.length,
+            hubNames: distinctHubs.map(h => h.name)
+        });
+
+        if (distinctHubs.length === 0) {
+             Alert.alert('Hub Location Not Found', 'Could not determine the Hub location for this route.');
+             return;
+        }
+
+        const openMap = (hub: any) => {
+             const lat = parseFloat(hub.latitude || hub.lat || 0);
+             const lng = parseFloat(hub.longitude || hub.lng || 0);
+             const label = hub.name || 'Hub';
+             const address = hub.address || hub.city || 'Hub Location';
+
+            if (lat !== 0 && lng !== 0) {
+                // Navigate to internal Navigation Screen
+                navigation.navigate('Navigation', { 
+                    type: 'Hub',
+                    address: address,
+                    latitude: lat,
+                    longitude: lng,
+                    recipientName: label,
+                    trackingId: 'Return to Base',
+                });
+            } else if (address) {
+                 // Even with just address, our NavigationScreen can self-heal/geocode
+                 navigation.navigate('Navigation', { 
+                    type: 'Hub',
+                    address: address,
+                    recipientName: label,
+                    trackingId: 'Return to Base',
+                });
+            } else {
+                 Alert.alert('Invalid Coordinates', `Hub "${hub.name}" has no location data.`);
+            }
+        };
+
+        if (distinctHubs.length === 1) {
+            // Single Hub - Go Direct
+            openMap(distinctHubs[0]);
+        } else {
+            // Multiple Hubs - Let User Choose
+            Alert.alert(
+                'Select Hub',
+                'Multiple hubs detected. Choose destination:',
+                [
+                    ...distinctHubs.map(hub => ({
+                        text: hub.name || hub.city || 'Hub',
+                        onPress: () => openMap(hub)
+                    })),
+                    { text: 'Cancel', style: 'cancel' }
+                ]
+            );
+        }
+    }, [rawRoutes, activeOrders, routeType]),
     stats: {
         urgent: urgentCount,
         nextDay: nextDayCount

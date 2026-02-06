@@ -52,6 +52,7 @@ import RoutePlanningScreen from "../screens/rider/RoutePlanningScreen";
 import NavigationScreen from "../screens/rider/NavigationScreen";
 import QRScannerScreen from "../screens/rider/QRScannerScreen";
 import PickupConfirmationScreen from "../screens/rider/PickupConfirmationScreen";
+// Delivery Confirmation Screen
 import DeliveryConfirmationScreen from "../screens/rider/DeliveryConfirmationScreen";
 import AboutScreen from "../screens/common/AboutScreen";
 import NotificationSettingsScreen from '../screens/common/NotificationSettingsScreen';

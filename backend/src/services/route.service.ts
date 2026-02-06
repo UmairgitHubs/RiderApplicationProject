@@ -19,15 +19,15 @@ export class RouteService {
       where,
       include: {
         rider: {
-          include: { user: { select: { full_name: true, id: true } } }
+          include: { user: { select: { full_name: true, id: true, phone: true } } }
         },
         hub: {
-          select: { id: true, name: true, city: true }
+          select: { id: true, name: true, city: true, address: true, latitude: true, longitude: true }
         },
         stops: {
           orderBy: { stop_order: 'asc' },
           include: {
-            shipment: { select: { cod_amount: true, status: true } }
+            shipment: { include: { hub: true } }
           }
         }
       },
@@ -42,7 +42,27 @@ export class RouteService {
     return prisma.$transaction(async (tx) => {
       const routeStatus = data.status || 'draft';
 
-      // 1. Create the route
+      // Fetch Hub Details for coordinates
+      const hub = await tx.hub.findUnique({ where: { id: data.hubId } });
+
+      // Intelligent Stop Processing
+      let allStops = [...data.stops];
+
+      // 1. Sort inputs to group by location (Clustering)
+      // This ensures shipments from the same merchant/location are grouped sequentially
+      allStops.sort((a, b) => { // Prioritize Pickups, then Sort by Location
+         if (a.type === 'pickup' && b.type !== 'pickup') return -1;
+         if (a.type !== 'pickup' && b.type === 'pickup') return 1;
+         
+         const locA = (a.location || '').toLowerCase();
+         const locB = (b.location || '').toLowerCase();
+         return locA.localeCompare(locB);
+      });
+
+      // 2. Auto-Inject Hub Drop-off for Pickups (REMOVED as per user request to use a Button instead)
+      // We will now rely on the frontend "Navigate to Hub" button.
+
+      // 3. Create the route
       const route = await tx.route.create({
         data: {
           name: data.name,
@@ -51,7 +71,7 @@ export class RouteService {
           vehicle_id: data.vehicleId,
           status: routeStatus,
           stops: {
-            create: data.stops.map((stop, index) => ({
+            create: allStops.map((stop, index) => ({
               stop_order: index + 1,
               type: stop.type || 'delivery',
               shipment_id: stop.shipmentId,
@@ -64,16 +84,14 @@ export class RouteService {
         include: { stops: true }
       });
 
-      // 2. If rider is assigned, update shipments
-      if (data.riderId && data.stops.length > 0) {
-        const shipmentIds = data.stops
+      // 4. Update Shipments
+      if (data.riderId && allStops.length > 0) {
+        const shipmentIds = allStops
           .filter(s => s.shipmentId)
           .map(s => s.shipmentId);
           
         if (shipmentIds.length > 0) {
            const updateData: any = { rider_id: data.riderId };
-           
-           // If route is active, set shipments to assigned
            if (routeStatus === 'active') {
                updateData.status = 'assigned';
            }
@@ -160,6 +178,63 @@ export class RouteService {
   }
 
   /**
+   * Delete a route and reset assigned shipments
+   */
+  async deleteRoute(id: string) {
+    return prisma.$transaction(async (tx) => {
+      // 1. Get the route with its shipments to identify what needs resetting
+      const route = await tx.route.findUnique({
+        where: { id },
+        include: {
+          stops: {
+            include: {
+              shipment: { select: { id: true, status: true, rider_id: true } }
+            }
+          }
+        }
+      });
+
+      if (!route) {
+        throw new Error('Route not found');
+      }
+
+      // 2. Identify active shipments that need to be reset
+      // We explicitly avoid resetting completed/final statuses like delivered, cancelled, returned.
+      // We DO reset picked_up/in_transit because if the route is deleted, the workflow is aborted.
+      const shipmentIdsToReset = route.stops
+        .filter(stop => 
+          stop.shipment && 
+          ['assigned', 'accepted', 'picked_up', 'in_transit'].includes(stop.shipment.status)
+        )
+        .map(stop => stop.shipment_id);
+
+      // 3. Reset shipments to pending and unassign rider
+      if (shipmentIdsToReset.length > 0) {
+        await tx.shipment.updateMany({
+          where: {
+             id: { in: shipmentIdsToReset as string[] }
+          },
+          data: {
+            status: 'pending',
+            rider_id: null
+          }
+        });
+      }
+
+      // 4. Delete the route (Stops should cascade, but we can be explicit to be safe)
+      await tx.routeStop.deleteMany({
+        where: { route_id: id }
+      });
+
+      await tx.route.delete({
+        where: { id }
+      });
+
+      return { success: true, message: 'Route deleted and shipments reset to pending' };
+    });
+  }
+
+  /**
    * Update Route Status and sync shipments
    */
   async updateStatus(id: string, status: string) {
@@ -197,18 +272,36 @@ export class RouteService {
    * Get Route Statistics
    */
   async getRouteStats() {
+    const workingStatuses = ['active', 'pending', 'draft', 'in_progress'];
+    
     const [activeRoutes, pendingRoutes, totalStops, pickupOrders, deliveryOrders] = await Promise.all([
-      prisma.route.count({ where: { status: 'active' } }),
+      prisma.route.count({ where: { status: { in: ['active', 'in_progress'] } } }),
       prisma.route.count({ where: { status: { in: ['pending', 'draft'] } } }),
-      prisma.routeStop.count(),
-      prisma.routeStop.count({ where: { type: 'pickup' } }),
-      prisma.routeStop.count({ where: { type: 'delivery' } })
+      
+      // Filter stops to only include those in working routes (exclude completed/cancelled)
+      prisma.routeStop.count({ 
+          where: { 
+              route: { status: { in: workingStatuses } } 
+          } 
+      }),
+      prisma.routeStop.count({ 
+          where: { 
+              type: 'pickup',
+              route: { status: { in: workingStatuses } } 
+          } 
+      }),
+      prisma.routeStop.count({ 
+          where: { 
+              type: 'delivery',
+              route: { status: { in: workingStatuses } } 
+          } 
+      })
     ]);
 
     // Calculate total COD value across all active/pending routes
     const stopsWithCod = await prisma.routeStop.findMany({
       where: {
-        route: { status: { in: ['active', 'pending', 'draft'] } }
+        route: { status: { in: workingStatuses } }
       },
       include: {
         shipment: { select: { cod_amount: true } }
@@ -224,7 +317,7 @@ export class RouteService {
     const activeRiders = await prisma.route.groupBy({
       by: ['rider_id'],
       where: { 
-        status: 'active', 
+        status: { in: ['active', 'in_progress'] }, 
         rider_id: { not: null } 
       }
     });
@@ -457,15 +550,19 @@ export class RouteService {
            // Process Deliveries
            batch.forEach((s, idx) => {
              const isFirstLeg = s.status !== 'received_at_hub';
+             
+             // SKIP Delivery Stop for First Leg (Merchant -> Hub)
+             // The drop-off is handled via "Navigate to Hub"
+             if (isFirstLeg) return;
+
              stopsData.push({
                 route_id: route.id,
                 shipment_id: s.id,
                 stop_order: batch.length + idx + 1,
                 type: 'delivery',
-                // If it's Merchant -> Hub, delivery is at Hub. Otherwise, Customer.
-                location: isFirstLeg ? (hub.address || hub.name) : s.delivery_address,
-                latitude: isFirstLeg ? hub.latitude : s.delivery_latitude,
-                longitude: isFirstLeg ? hub.longitude : s.delivery_longitude
+                location: s.delivery_address,
+                latitude: s.delivery_latitude,
+                longitude: s.delivery_longitude
              });
            });
 

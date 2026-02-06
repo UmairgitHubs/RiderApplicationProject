@@ -280,72 +280,76 @@ export const createShipment = async (req: Request, res: Response) => {
               
           } else {
               // --- ROW > 0: CREATE NEW SHIPMENT ---
-              const rowTracking = generateTrackingNumber();
+              try {
+                  const rowTracking = generateTrackingNumber();
 
-              const rowShipment = await prisma.shipment.create({
-                 data: {
-                  tracking_number: rowTracking,
-                  merchant_id: userId,
-                  recipient_name: rowName,
-                  recipient_phone: rowPhone.toString(), 
-                  recipient_city: rowCity,
-                  pickup_address: pickupAddress,
-                  pickup_city: pickupCity || null,
-                  hub_id: originHubId,
-                  delivery_address: rowAddress,
-                  package_type: rowType,
-                  package_weight: parseFloat(rowWeight.toString()) || 1,
-                  delivery_fee: deliveryFee,
-                  status: initialStatus,
-                  batch_id: batchId,
-                  shipment_type: 'franchise',
-                  cod_amount: parseFloat(rowCOD.toString()) || 0,
-                  special_instructions: rowInstructions,
-                  payment_method: paymentMethod || 'wallet',
-                  payment_status: 'pending'
-                } as any
-              });
+                  const rowShipment = await prisma.shipment.create({
+                     data: {
+                      tracking_number: rowTracking,
+                      merchant_id: userId,
+                      recipient_name: rowName,
+                      recipient_phone: rowPhone.toString(), 
+                      recipient_city: rowCity,
+                      pickup_address: pickupAddress,
+                      pickup_city: pickupCity || null,
+                      hub_id: originHubId,
+                      delivery_address: rowAddress,
+                      package_type: rowType,
+                      package_weight: parseFloat(rowWeight.toString()) || 1,
+                      delivery_fee: deliveryFee,
+                      status: initialStatus,
+                      batch_id: batchId,
+                      shipment_type: 'franchise',
+                      cod_amount: parseFloat(rowCOD.toString()) || 0,
+                      special_instructions: rowInstructions,
+                      payment_method: paymentMethod || 'wallet',
+                      payment_status: 'pending'
+                    } as any
+                  });
 
-              // Create package record for this shipment immediately
-               const pkgRecord = await prisma.package.create({
-                data: {
-                  shipment_id: rowShipment.id,
-                  weight: parseFloat(rowWeight.toString()) || 1,
-                  dimensions: 'standard',
-                  type: rowType,
-                  fragile: false
-                } as any
-              });
+                  // Create package record for this shipment immediately
+                   const pkgRecord = await prisma.package.create({
+                    data: {
+                      shipment_id: rowShipment.id,
+                      weight: parseFloat(rowWeight.toString()) || 1,
+                      dimensions: 'standard',
+                      type: rowType,
+                      fragile: false
+                    } as any
+                  });
 
-              // Generate barcode/QR for this package
-               const barcodeNumber = generateBarcodeNumber(rowTracking, 1);
-               const qrData = JSON.stringify({
-                 barcodeNumber,
-                 trackingNumber: rowTracking,
-                 shipmentId: rowShipment.id,
-                 packageNumber: 1,
-                 packageId: `${rowShipment.id}-PKG1`
-               });
-               
-               try {
-                 const qrCodeUrl = await QRCode.toDataURL(qrData);
-                 await prisma.package.update({
-                   where: { id: pkgRecord.id },
-                   data: {
-                     barcode_number: barcodeNumber,
-                     qr_code_url: qrCodeUrl
-                   }
-                 });
-               } catch (e) { console.error('QR Gen Error', e); }
-              
-              // Initial History
-              await prisma.shipmentTracking.create({
-                data: {
-                   shipment_id: rowShipment.id,
-                   status: 'pending',
-                   location_address: 'Merchant Location'
-                } as any
-              });
+                  // Generate barcode/QR for this package
+                   const barcodeNumber = generateBarcodeNumber(rowTracking, 1);
+                   const qrData = JSON.stringify({
+                     barcodeNumber,
+                     trackingNumber: rowTracking,
+                     shipmentId: rowShipment.id,
+                     packageNumber: 1,
+                     packageId: `${rowShipment.id}-PKG1`
+                   });
+                   
+                   try {
+                     const qrCodeUrl = await QRCode.toDataURL(qrData);
+                     await prisma.package.update({
+                       where: { id: pkgRecord.id },
+                       data: {
+                         barcode_number: barcodeNumber,
+                         qr_code_url: qrCodeUrl
+                       }
+                     });
+                   } catch (e) { console.error('QR Gen Error', e); }
+                  
+                  // Initial History
+                  await prisma.shipmentTracking.create({
+                    data: {
+                       shipment_id: rowShipment.id,
+                       status: 'pending',
+                       location_address: 'Merchant Location'
+                    } as any
+                  });
+              } catch (rowError) {
+                  console.error(`Error processing row ${i}:`, rowError);
+              }
           }
         }
       } catch (err) {
@@ -537,7 +541,28 @@ export const getMerchantShipments = async (req: Request, res: Response) => {
         orderBy: { created_at: 'desc' },
         include: {
           packages: { select: { id: true } },
-          rider: { select: { id: true, full_name: true, phone: true } },
+          rider: { 
+            select: { 
+              id: true, 
+              full_name: true, 
+              phone: true,
+              rider: {
+                select: {
+                  vehicle_type: true,
+                  vehicle_number: true,
+                  vehicle_model: true
+                }
+              }
+            } 
+          },
+          hub: {
+             select: {
+                id: true,
+                name: true,
+                address: true,
+                city: true
+             }
+          }
         },
       }),
       prisma.shipment.count({ where }),
@@ -556,7 +581,15 @@ export const getMerchantShipments = async (req: Request, res: Response) => {
           codAmount: s.cod_amount,
           createdAt: s.created_at,
           packageCount: s.packages.length,
-          rider: s.rider,
+          rider: s.rider ? {
+            id: s.rider.id,
+            full_name: s.rider.full_name,
+            phone: s.rider.phone,
+            vehicle_type: s.rider.rider?.vehicle_type,
+            vehicle_number: s.rider.rider?.vehicle_number,
+            vehicle_model: s.rider.rider?.vehicle_model
+          } : null,
+          hub: s.hub,
           // Franchise/Bulk Support
           batchId: s.batch_id,
           shipmentType: s.shipment_type,
