@@ -132,6 +132,7 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
             shipment.status === 'received_at_hub' || 
             shipment.status === 'in_transit' || 
             shipment.status === 'out_for_delivery' ||
+            shipment.status === 'picked_up' ||
             ((shipment.status === 'assigned' || shipment.status === 'pending') && !!shipment.pickupRiderId && !!shipment.hubId)
         );
 
@@ -453,15 +454,51 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
          pending.forEach((s: any) => {
              const sShipment = s.shipment || {};
              
-             // Filter out First Mile Delivery Stops (Hub Dropoffs) - Legacy Support
-             if (s.type === 'delivery' && (sShipment.status === 'assigned' || sShipment.status === 'pending')) {
-                 return;
+             // Check if Second Leg (Hub Pickup)
+             const isSecondLeg = (
+                sShipment.status === 'received_at_hub' || 
+                sShipment.status === 'in_transit' || 
+                sShipment.status === 'out_for_delivery' ||
+                sShipment.status === 'picked_up' || 
+                ((sShipment.status === 'assigned' || sShipment.status === 'pending') && !!sShipment.pickupRiderId && !!sShipment.hubId)
+            );
+
+            // Filter out Delivery Stops that shouldn't be visible yet
+            // 1. First Mile Delivery Stops (Hub Dropoffs) - these are handled implicitly by pickup completion in new flow
+            // 2. Second Mile Delivery Stops (To Customer) - only show if ALREADY picked up from Hub
+             if (s.type === 'delivery') {
+                 if (isSecondLeg) {
+                     // Second Mile Delivery: Only show if status is 'picked_up' or later
+                     // If status is still 'received_at_hub' or 'assigned', HIDE delivery stop. Rider must pick up first.
+                     if (sShipment.status === 'received_at_hub' || sShipment.status === 'assigned' || sShipment.status === 'pending') {
+                         return;
+                     }
+                 } else {
+                     // First Mile Delivery (to Hub): Hide if status is assigned/pending (Pickup not done)
+                     if (sShipment.status === 'assigned' || sShipment.status === 'pending') {
+                         return;
+                     }
+                 }
              }
              
              const taskType = (s.type || ((sShipment.status === 'picked_up' || sShipment.status === 'in_transit') ? 'delivery' : 'pickup'));
              
              // Normalize internal structure for grouping
              const item = { ...s, _taskType: taskType };
+
+             // FORCE HUB LOCATION OVERRIDE for Second Mile Pickups
+             if (taskType === 'pickup' && isSecondLeg && sShipment.hub) {
+                 item.latitude = parseFloat(sShipment.hub.latitude);
+                 item.longitude = parseFloat(sShipment.hub.longitude);
+                 item.pickupLatitude = parseFloat(sShipment.hub.latitude);
+                 item.pickupLongitude = parseFloat(sShipment.hub.longitude);
+                 item.location = sShipment.hub.address || sShipment.hub.name;
+                 item.pickup_address = sShipment.hub.address || sShipment.hub.name;
+                 
+                 // Cosmetic Override for UI clarity
+                 sShipment.pickup_address = sShipment.hub.address; // Ensure UI sees Hub Address
+             }
+
              if (taskType === 'pickup') {
                  pendingPickups.push(item);
              } else {
@@ -488,6 +525,7 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
                 shipment.status === 'received_at_hub' || 
                 shipment.status === 'in_transit' || 
                 shipment.status === 'out_for_delivery' ||
+                shipment.status === 'picked_up' ||
                 ((shipment.status === 'assigned' || shipment.status === 'pending') && !!shipment.pickupRiderId && !!shipment.hubId)
             );
 
@@ -588,13 +626,27 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
          let finalStops = [...mappedCompleted, ...mappedPending];
          finalStops.forEach((s, i) => s.stopNumber = i + 1);
 
-         // 10. Mark Active Information
-         let activeFound = false;
+         // 10. Mark Active Information & Final Safety Deduplication
+         const activeFound = { current: false };
+         const seenShipments = new Set<string>();
+         
+         finalStops = finalStops.filter(stop => {
+             // Safety Dedup: Ensure unique Shipment+Type
+             // Exception: Don't dedup Group/Bulk headers against themselves (they have unique group IDs)
+             // But DO dedup if we somehow have multiple stops for same shipment
+             if (!stop.isGroup) {
+                 const key = `${stop.shipmentId}-${stop.taskType}`;
+                 if (seenShipments.has(key)) return false;
+                 seenShipments.add(key);
+             }
+             return true;
+         });
+
          let newCurrentIndex = 0;
          finalStops = finalStops.map((stop, index) => {
              if (stop.status === 'completed') return stop;
-             if (!activeFound) {
-                 activeFound = true;
+             if (!activeFound.current) {
+                 activeFound.current = true;
                  newCurrentIndex = index;
                  return { ...stop, status: 'active' };
              }

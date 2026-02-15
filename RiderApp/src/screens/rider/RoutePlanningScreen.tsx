@@ -277,34 +277,44 @@ export default function RoutePlanningScreen() {
               </View>
             </View>
 
-            <TouchableOpacity
-              style={styles.startNavigationButton}
-              onPress={() => {
-                navigation.navigate('Navigation', { 
-                  type: currentStop.taskType === 'pickup' ? 'Pickup' : 'Delivery',
-                  address: currentStop.address,
-                  latitude: currentStop.latitude,
-                  longitude: currentStop.longitude,
-                  recipientName: currentStop.recipient,
-                  trackingId: currentStop.trackingId,
-                  orderId: currentStop.shipmentId,
-                  order: { 
-                      id: currentStop.shipmentId,
-                      ...currentStop.shipment // Pass full shipment details for context
-                  },
-                  subItems: currentStop.subItems, // Pass the array of grouped items
-                  isGroup: currentStop.isGroup // Flag for bulk processing
-                });
-              }}
-            >
-              <LinearGradient
-                colors={currentStop.type === 'urgent' ? ['#F44336', '#FF6B00'] : ['#2196F3', '#42A5F5']}
-                style={styles.startNavigationButtonGradient}
-              >
-                <Ionicons name="navigate-outline" size={20} color={colors.textWhite} />
-                <Text style={styles.startNavigationButtonText}>Start Navigation</Text>
-              </LinearGradient>
-            </TouchableOpacity>
+            {/* Check for Pending Pickups Lock */}
+            {currentStop.taskType === 'delivery' && stops.some(s => s.taskType === 'pickup' && s.status !== 'completed') ? (
+                <View style={[styles.priorityMessage, { backgroundColor: '#FFF3E0', marginTop: 16 }]}>
+                    <Ionicons name="alert-circle" size={24} color="#FF9800" />
+                    <Text style={[styles.priorityText, { color: '#E65100', marginLeft: 8 }]}>
+                        Pickup Required First!{'\n'}Please go back and complete the pickup at the Hub.
+                    </Text>
+                </View>
+            ) : (
+                <TouchableOpacity
+                  style={styles.startNavigationButton}
+                  onPress={() => {
+                    navigation.navigate('Navigation', { 
+                      type: currentStop.taskType === 'pickup' ? 'Pickup' : 'Delivery',
+                      address: currentStop.address,
+                      latitude: currentStop.latitude,
+                      longitude: currentStop.longitude,
+                      recipientName: currentStop.recipient,
+                      trackingId: currentStop.trackingId,
+                      orderId: currentStop.shipmentId,
+                      order: { 
+                          id: currentStop.shipmentId,
+                          ...currentStop.shipment // Pass full shipment details for context
+                      },
+                      subItems: currentStop.subItems, // Pass the array of grouped items
+                      isGroup: currentStop.isGroup // Flag for bulk processing
+                    });
+                  }}
+                >
+                  <LinearGradient
+                    colors={currentStop.type === 'urgent' ? ['#F44336', '#FF6B00'] : ['#2196F3', '#42A5F5']}
+                    style={styles.startNavigationButtonGradient}
+                  >
+                    <Ionicons name="navigate-outline" size={20} color={colors.textWhite} />
+                    <Text style={styles.startNavigationButtonText}>Start Navigation</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+            )}
           </View>
         )}
 
