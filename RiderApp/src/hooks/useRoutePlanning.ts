@@ -22,6 +22,7 @@ export interface RouteStop {
   itemCount?: number; // For grouped stops (e.g., bulk pickup)
   subItems?: { shipmentId: string, trackingId: string }[]; // Details of grouped items
   isGroup?: boolean;
+  shipment?: any; // Full shipment object for context
 }
 
 export interface RouteStats {
@@ -122,17 +123,35 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
         }
 
         let latVal = 0, lngVal = 0, address = '';
-        const isSecondLeg = (shipment.status === 'received_at_hub' || shipment.status === 'in_transit' || shipment.status === 'out_for_delivery');
+        
+        // Is Second Leg?
+        // Logic: 
+        // 1. Status implies it (received_at_hub, in_transit, out_for_delivery)
+        // 2. OR it is 'assigned'/'pending' BUT has a Pickup Rider ID (meaning first mile done) AND a Hub ID
+        const isSecondLeg = (
+            shipment.status === 'received_at_hub' || 
+            shipment.status === 'in_transit' || 
+            shipment.status === 'out_for_delivery' ||
+            ((shipment.status === 'assigned' || shipment.status === 'pending') && !!shipment.pickupRiderId && !!shipment.hubId)
+        );
+
         const hubAddress = shipment.hub?.address || shipment.hub?.name || 'Hub';
         const hubLat = shipment.hub?.latitude;
         const hubLng = shipment.hub?.longitude;
 
         if (taskType === 'pickup') {
             if (item.location) { latVal = item.latitude; lngVal = item.longitude; address = item.location; }
-            else if (shipment.pickupAddress) { latVal = shipment.pickupLatitude; lngVal = shipment.pickupLongitude; address = shipment.pickupAddress; }
+            else if (shipment.pickupAddress && !isSecondLeg) { // Only use merchant address if NOT second leg
+                 latVal = shipment.pickupLatitude; lngVal = shipment.pickupLongitude; address = shipment.pickupAddress; 
+            }
             else {
-                if (isSecondLeg) { latVal = hubLat; lngVal = hubLng; address = hubAddress; }
-                else { latVal = shipment.pickup_latitude; lngVal = shipment.pickup_longitude; address = shipment.pickup_address; }
+                // Determine source: Hub or Merchant
+                if (isSecondLeg) { 
+                    latVal = hubLat; lngVal = hubLng; address = hubAddress; 
+                }
+                else { 
+                    latVal = shipment.pickup_latitude; lngVal = shipment.pickup_longitude; address = shipment.pickup_address; 
+                }
             }
         } else {
             if (item.location) { latVal = item.latitude; lngVal = item.longitude; address = item.location; }
@@ -140,7 +159,7 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
             else {
                 // If it's First Mile (not second leg), we are delivering TO HUB
                 // Logic: NOT Second Leg AND Has Hub ID = First Mile (Merchant -> Hub)
-                if (!isSecondLeg && shipment.hub_id) { latVal = hubLat; lngVal = hubLng; address = hubAddress; }
+                if (!isSecondLeg && shipment.hubId) { latVal = hubLat; lngVal = hubLng; address = hubAddress; }
                 else { latVal = shipment.delivery_latitude; lngVal = shipment.delivery_longitude; address = shipment.delivery_address; }
             }
         }
@@ -231,7 +250,8 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
             latitude: lat,
             longitude: lng,
             itemCount: order.itemCount,
-            subItems: order.subItems
+            subItems: order.subItems,
+            isGroup: order.isGroup
         });
     };
 
@@ -453,13 +473,42 @@ export const useRoutePlanning = (initialRouteType: 'urgent' | 'nextDay' = 'urgen
          const groupedPickups: any[] = [];
          const pickupGroups = new Map<string, any[]>();
          
-         pendingPickups.forEach(p => {
-             const sShipment = p.shipment || {};
-             const lat = parseFloat(p.latitude || p.pickupLatitude || sShipment.pickupLatitude || sShipment.pickup_latitude || '0');
-             const lng = parseFloat(p.longitude || p.pickupLongitude || sShipment.pickupLongitude || sShipment.pickup_longitude || '0');
-             const address = p.location || sShipment.pickup_address || sShipment.pickupAddress || 'Unknown';
-             const key = (lat !== 0 && lng !== 0) ? `${lat.toFixed(4)},${lng.toFixed(4)}` : address.trim().toLowerCase();
+         // Helper for key generation
+         const getEfficientKey = (item: any) => {
+             // Use the same consistent logic as optimization
+             const info = optimizeAndMapOrders([item], 0, 0, routeType)[0]; 
+             // Note: Calling optimizeAndMapOrders here is slightly inefficient but ensures consistency. 
+             // Better: abstract getStopInfo out. For now, let's replicate the core 'Hub vs Merchant' logic briefly:
              
+             let lat = 0, lng = 0, address = '';
+             const shipment = item.shipment || item;
+             
+             // Check if Second Leg (Hub Pickup)
+             const isSecondLeg = (
+                shipment.status === 'received_at_hub' || 
+                shipment.status === 'in_transit' || 
+                shipment.status === 'out_for_delivery' ||
+                ((shipment.status === 'assigned' || shipment.status === 'pending') && !!shipment.pickupRiderId && !!shipment.hubId)
+            );
+
+            if (isSecondLeg) {
+                 // Use Hub Coords/Address for grouping key
+                 lat = shipment.hub?.latitude || 0;
+                 lng = shipment.hub?.longitude || 0;
+                 address = shipment.hub?.address || shipment.hub?.name || 'Hub';
+            } else {
+                 // Use Merchant/Raw Coords
+                 lat = parseFloat(item.latitude || item.pickupLatitude || shipment.pickupLatitude || shipment.pickup_latitude || '0');
+                 lng = parseFloat(item.longitude || item.pickupLongitude || shipment.pickupLongitude || shipment.pickup_longitude || '0');
+                 address = item.location || shipment.pickup_address || shipment.pickupAddress || 'Unknown';
+            }
+
+            if (lat !== 0 && lng !== 0) return `${lat.toFixed(4)},${lng.toFixed(4)}`;
+            return address.trim().toLowerCase();
+         };
+
+         pendingPickups.forEach(p => {
+             const key = getEfficientKey(p);
              if (!pickupGroups.has(key)) pickupGroups.set(key, []);
              pickupGroups.get(key)?.push(p);
          });

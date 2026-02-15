@@ -288,9 +288,12 @@ export default function RoutePlanningScreen() {
                   recipientName: currentStop.recipient,
                   trackingId: currentStop.trackingId,
                   orderId: currentStop.shipmentId,
-                  order: { id: currentStop.shipmentId },
-                  subItems: currentStop.subItems,
-                  isGroup: currentStop.isGroup
+                  order: { 
+                      id: currentStop.shipmentId,
+                      ...currentStop.shipment // Pass full shipment details for context
+                  },
+                  subItems: currentStop.subItems, // Pass the array of grouped items
+                  isGroup: currentStop.isGroup // Flag for bulk processing
                 });
               }}
             >

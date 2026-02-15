@@ -1255,7 +1255,9 @@ export const getRiderRoutes = async (req: Request, res: Response) => {
                 pickup_longitude: true,
                 delivery_latitude: true,
                 delivery_longitude: true,
-                distance_km: true
+                distance_km: true,
+                hub_id: true,
+                pickup_rider_id: true
               }
             }
           }
@@ -1284,7 +1286,11 @@ export const getRiderRoutes = async (req: Request, res: Response) => {
             location: stop.location,
             latitude: stop.latitude,
             longitude: stop.longitude,
-            shipment: stop.shipment,
+            shipment: stop.shipment ? {
+                ...stop.shipment,
+                hubId: stop.shipment.hub_id,
+                pickupRiderId: stop.shipment.pickup_rider_id
+            } : null,
             arrivalTime: stop.arrival_time
           }))
         }))

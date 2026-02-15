@@ -105,27 +105,45 @@ export default function PickupConfirmationScreen() {
               </View>
           </View>
 
-          {/* Generated IDs */}
-          <View style={styles.card}>
-              <Text style={styles.cardHeader}># Generated IDs</Text>
-              
-              <View style={styles.idRow}>
-                  <Text style={styles.idLabel}>Inbit ID</Text>
-                  <Text style={styles.idValueHighlight}>{order?.tracking_number || 'INB49221582'}</Text>
+          {/* Generated IDs / Bulk List */}
+          {isGroup && subItems ? (
+             <View style={styles.card}>
+                 <Text style={styles.cardHeader}>Bulk Pickup Details</Text>
+                 <View style={styles.amountRow}>
+                     <Text style={styles.amountLabel}>Total Shipments</Text>
+                     <Text style={styles.amountValue}>{subItems.length}</Text>
+                 </View>
+                 <View style={styles.divider} />
+                 <Text style={[styles.idLabel, { marginBottom: 8 }]}>Tracking Numbers:</Text>
+                 {subItems.map((item: any, index: number) => (
+                    <View key={index} style={styles.bulkItemRow}>
+                        <Text style={styles.bulkIndex}>{index + 1}.</Text>
+                        <Text style={styles.idValueHighlight}>{item.trackingId || item.tracking_number}</Text>
+                    </View>
+                 ))}
+             </View>
+          ) : (
+              <View style={styles.card}>
+                  <Text style={styles.cardHeader}># Generated IDs</Text>
+                  
+                  <View style={styles.idRow}>
+                      <Text style={styles.idLabel}>Inbit ID</Text>
+                      <Text style={styles.idValueHighlight}>{order?.tracking_number || 'INB49221582'}</Text>
+                  </View>
+                  <View style={styles.divider} />
+                  
+                  <View style={styles.idRow}>
+                      <Text style={styles.idLabel}>Merchant ID</Text>
+                      <Text style={styles.idValue}>{((order?.merchant_id || '').substring(0, 8)).toUpperCase() || 'MERGJQRXP'}</Text>
+                  </View>
+                  <View style={styles.divider} />
+                  
+                  <View style={styles.idRow}>
+                      <Text style={styles.idLabel}>Rider ID</Text>
+                      <Text style={styles.idValue}>{((order?.rider_id || '').substring(0, 8)).toUpperCase() || 'RIDL06VZH'}</Text>
+                  </View>
               </View>
-              <View style={styles.divider} />
-              
-              <View style={styles.idRow}>
-                  <Text style={styles.idLabel}>Merchant ID</Text>
-                  <Text style={styles.idValue}>{((order?.merchant_id || '').substring(0, 8)).toUpperCase() || 'MERGJQRXP'}</Text>
-              </View>
-              <View style={styles.divider} />
-              
-              <View style={styles.idRow}>
-                  <Text style={styles.idLabel}>Rider ID</Text>
-                  <Text style={styles.idValue}>{((order?.rider_id || '').substring(0, 8)).toUpperCase() || 'RIDL06VZH'}</Text>
-              </View>
-          </View>
+          )}
 
           {/* Pickup Location */}
           <View style={styles.card}>
@@ -361,5 +379,30 @@ const styles = StyleSheet.create({
       color: '#FFF',
       fontSize: 16,
       fontWeight: '600',
+  },
+  bulkItemRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 6,
+  },
+  bulkIndex: {
+      width: 24,
+      color: '#666',
+      fontWeight: '600',
+  },
+  amountRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: spacing.xs,
+  },
+  amountLabel: {
+    fontSize: 14,
+    color: '#757575',
+  },
+  amountValue: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#00C853',
   }
 });
